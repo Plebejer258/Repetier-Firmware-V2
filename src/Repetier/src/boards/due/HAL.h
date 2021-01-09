@@ -32,7 +32,11 @@
 
 // You can set different sizes if you want, but with binary mode it does not get faster
 #ifndef SERIAL_RX_BUFFER_SIZE
+#ifdef SERIAL_BUFFER_SIZE
+#define SERIAL_RX_BUFFER_SIZE SERIAL_BUFFER_SIZE
+#else
 #define SERIAL_RX_BUFFER_SIZE 128
+#endif
 #endif
 
 #ifndef HAL_H
@@ -101,10 +105,20 @@ typedef char prog_char;
 #define FSTRINGVAR(var) static const char var[] PROGMEM;
 #define FSTRINGPARAM(var) PGM_P var
 
+#define PWM_CLOCK_FREQ 10000
+#define PWM_COUNTER_100MS PWM_CLOCK_FREQ / 10
+
+// Manipulate the SAM3X8E's real time timer for motion2
+// instead of using a valuable PWM-capable timer 
+// Only really good for < 8000Hz
+#define MOTION2_USE_REALTIME_TIMER 1 
+#if (DISABLED(MOTION2_USE_REALTIME_TIMER) || PREPARE_FREQUENCY > (PWM_CLOCK_FREQ / 2))
 #define MOTION2_TIMER TC0
 #define MOTION2_TIMER_CHANNEL 0
 #define MOTION2_TIMER_IRQ ID_TC0
 #define MOTION2_TIMER_VECTOR TC0_Handler
+#endif
+
 #define PWM_TIMER TC0
 #define PWM_TIMER_CHANNEL 1
 #define PWM_TIMER_IRQ ID_TC1
@@ -130,13 +144,6 @@ typedef char prog_char;
 // TWI1 if SDA pin = 20  TWI0 for pin = 70
 #define TWI_INTERFACE TWI1
 #define TWI_ID ID_TWI1
-
-// #define PWM_CLOCK_FREQ          3906
-// #define PWM_COUNTER_100MS       390
-#define PWM_CLOCK_FREQ 10000
-#define PWM_COUNTER_100MS 1000
-//#define MOTION3_CLOCK_FREQ       244
-//#define MOTION3_PRESCALE         2
 
 #define SERVO_CLOCK_FREQ 1000
 #define SERVO_PRESCALE 2 // Using TCLOCK1 therefore 2
@@ -318,6 +325,7 @@ public:
     static char virtualEeprom[EEPROM_BYTES];
     static bool wdPinged;
     static uint8_t i2cError;
+    static BootReason startReason;
 
     HAL();
     virtual ~HAL();
@@ -333,8 +341,11 @@ public:
     static void setHardwareFrequency(int id, uint32_t frequency);
     // do any hardware-specific initialization here
     static inline void hwSetup(void) {
+        updateStartReason();
 #if !FEATURE_WATCHDOG
         WDT_Disable(WDT); // Disable watchdog
+#else
+        WDT->WDT_MR |= WDT_MR_WDDBGHLT; // Disable watchdog when debugging only.
 #endif
 
 #if defined(TWI_CLOCK_FREQ) && TWI_CLOCK_FREQ > 0 //init i2c if we have a frequency
@@ -363,6 +374,8 @@ public:
 #if EEPROM_AVAILABLE == EEPROM_FLASH && EEPROM_MODE != EEPROM_NONE
         FEInit();
 #endif
+        trng_enable(TRNG);
+        randomSeed(trng_read_output_data(TRNG));
     }
     static inline void digitalWrite(uint8_t pin, uint8_t value) {
         WRITE_VAR(pin, value);
@@ -534,11 +547,19 @@ public:
     }
 
     static inline void serialSetBaudrate(long baud) {
+        static bool serialInitialized = false;
         Serial.setInterruptPriority(1);
+        if (serialInitialized && static_cast<Stream*>(&RFSERIAL) != &SerialUSB) { // When just updating the baudrate, don't restart USB.
+            RFSERIAL.end();
+        }
         RFSERIAL.begin(baud);
 #if defined(BLUETOOTH_SERIAL) && BLUETOOTH_SERIAL > 0
+        if (serialInitialized && static_cast<Stream*>(&RFSERIAL2) != &SerialUSB) { // When just updating the baudrate, don't restart USB.
+            RFSERIAL2.end();
+        }
         RFSERIAL2.begin(baud);
 #endif
+        serialInitialized = true;
     }
     static inline void serialFlush() {
         RFSERIAL.flush();
@@ -547,6 +568,8 @@ public:
 #endif
     }
     static void setupTimer();
+    static void handlePeriodical();
+    static void updateStartReason();
     static void showStartReason();
     static int getFreeRam();
     static void resetHardware();

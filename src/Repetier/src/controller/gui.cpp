@@ -18,6 +18,9 @@ char GUI::status[MAX_COLS + 1];              ///< Status Line
 char GUI::buf[MAX_COLS + 1];                 ///< Buffer to build strings
 char GUI::tmpString[MAX_COLS + 1];           ///< Buffer to build strings
 fast8_t GUI::bufPos;                         ///< Pos for appending data
+GUIBootState GUI::curBootState = GUIBootState::DISPLAY_INIT;
+bool GUI::textIsScrolling = false; ///< Our selected row/text is now scrolling/anim
+probeProgInfo* GUI::curProbingProgress = nullptr;
 #if SDSUPPORT
 char GUI::cwd[SD_MAX_FOLDER_DEPTH * LONG_FILENAME_LENGTH + 2] = { '/', 0 };
 uint8_t GUI::folderLevel = 0;
@@ -27,31 +30,63 @@ uint8_t GUI::folderLevel = 0;
 void GUI::init() { ///< Initialize display
     level = 0;
 }
+void GUI::processInit() { ///< Function repeatedly called if curBootState isn't at least IN_INTRO
+}
 
 void GUI::refresh() {
 }
 
 void GUI::resetMenu() { } ///< Go to start page
 
+void __attribute__((weak)) probeProgress(GUIAction action, void* data) { }
 void __attribute__((weak)) startScreen(GUIAction action, void* data) { }
 void __attribute__((weak)) waitScreen(GUIAction action, void* data) { }
 void __attribute__((weak)) infoScreen(GUIAction action, void* data) { }
 void __attribute__((weak)) warningScreen(GUIAction action, void* data) { }
 void __attribute__((weak)) errorScreen(GUIAction action, void* data) { }
+void __attribute__((weak)) waitScreenP(GUIAction action, void* data) { }
+void __attribute__((weak)) infoScreenP(GUIAction action, void* data) { }
+void __attribute__((weak)) warningScreenP(GUIAction action, void* data) { }
+void __attribute__((weak)) errorScreenP(GUIAction action, void* data) { }
 #endif
 
 #if DISPLAY_DRIVER != DRIVER_NONE
 void GUI::resetMenu() { ///< Go to start page
     level = 0;
-    replace(Printer::isPrinting() ? printProgress : startScreen, nullptr, GUIPageType::TOPLEVEL);
+    replace(Printer::isPrinting() ? printProgress : Printer::isZProbingActive() ? probeProgress : startScreen, nullptr, GUIPageType::TOPLEVEL);
 }
 #endif
 
 void GUI::update() {
 #if DISPLAY_DRIVER != DRIVER_NONE
     millis_t timeDiff = HAL::timeInMilliseconds() - lastRefresh;
-
-    handleKeypress(); // Test for new keys
+    handleKeypress();                                 // Test for new keys
+    if (curBootState == GUIBootState::DISPLAY_INIT) { // Small delay before we start processing
+        processInit();
+        nextAction = GUIAction::NONE;
+        contentChanged = false;
+        return;
+    } else if (curBootState == GUIBootState::IN_INTRO) { // Boot screen
+        if (contentChanged || (timeDiff < 60000 && timeDiff > 1000)) {
+            // Skip if any key presses or timeout.
+            curBootState = GUIBootState::READY;
+            lastRefresh = HAL::timeInMilliseconds();
+            if (HAL::startReason == BootReason::WATCHDOG_RESET) {
+                push(warningScreenP, (void*)PSTR("Reset by Watchdog!"), GUIPageType::STATUS);
+                Printer::playDefaultSound(DefaultSounds::WARNING);
+            } else if (HAL::startReason == BootReason::BROWNOUT) {
+#ifdef ALWAYS_SHOW_BROWNOUT_WARNING
+                push(warningScreenP, (void*)PSTR("Brownout reset!"), GUIPageType::STATUS);
+                Printer::playDefaultSound(DefaultSounds::WARNING);
+#else
+                if (Printer::isRescueRequired()) {
+                    push(warningScreenP, (void*)PSTR("Brownout reset!"), GUIPageType::STATUS);
+                    Printer::playDefaultSound(DefaultSounds::WARNING);
+                }
+#endif
+            }
+        }
+    }
 
     if (nextAction == GUIAction::BACK) {
         Printer::playDefaultSound(DefaultSounds::OK);
@@ -77,7 +112,7 @@ void GUI::update() {
     if (level > 0 && !isStickyPageType(pageType[level]) && (HAL::timeInMilliseconds() - lastAction) > UI_AUTORETURN_TO_MENU_AFTER) {
         level = 0;
     }
-    if (statusLevel == GUIStatusLevel::BUSY && timeDiff > 500) {
+    if ((statusLevel == GUIStatusLevel::BUSY || GUI::textIsScrolling) && timeDiff > 500) {
         contentChanged = true; // for faster spinning icon
     }
     if (timeDiff < 60000 && (timeDiff > 1000 || contentChanged)) {
@@ -102,6 +137,10 @@ void GUI::pop() {
         level--;
         contentChanged = true;
     }
+}
+
+void GUI::pop(int selection) {
+    GUI::pop();
 }
 
 void GUI::popBusy() {
@@ -159,6 +198,7 @@ void GUI::pushOn(GUIAction a, GuiCallback cb, void* cData, GUIPageType tp) {
 void GUI::backKey() {
     nextAction = GUIAction::BACK;
     contentChanged = true;
+    resetScrollbarTimer();
 }
 
 void GUI::nextKey() {
@@ -168,6 +208,7 @@ void GUI::nextKey() {
     nextAction = GUIAction::NEXT;
     nextActionRepeat++;
     contentChanged = true;
+    resetScrollbarTimer();
 }
 
 void GUI::previousKey() {
@@ -177,17 +218,22 @@ void GUI::previousKey() {
     nextAction = GUIAction::PREVIOUS;
     nextActionRepeat++;
     contentChanged = true;
+    resetScrollbarTimer();
 }
 
 void GUI::okKey() {
     nextAction = GUIAction::CLICK;
     contentChanged = true;
+    resetScrollbarTimer();
 }
 
 /** Check for button and store result in nextAction. */
 void GUI::handleKeypress() {
-    setEncoderA(ControllerEncA::get());
-    setEncoderB(ControllerEncB::get());
+    if (!ControllerClick::get()) {
+        setEncoder();
+        // setEncoderA(ControllerEncA::get());
+        // setEncoderB(ControllerEncB::get());
+    }
     // debounce clicks
     if (nextAction == GUIAction::CLICK_PROCESSED || nextAction == GUIAction::BACK_PROCESSED) {
         millis_t timeDiff = HAL::timeInMilliseconds() - lastAction;
@@ -215,57 +261,47 @@ void GUI::handleKeypress() {
 #endif
 }
 
-#if ENCODER_SPEED == 0
+static uint16_t encoderCurrent = 0;
+static fast8_t encCounter = 0;
 const int8_t encoder_table[16] PROGMEM = { 0, 1, -1, 0, -1, 0, 0, 1, 1, 0, 0, -1, 0, -1, 1, 0 }; // Full speed
+#if ENCODER_SPEED == 0
+#define ENCODER_CHANGES 1
 #elif ENCODER_SPEED == 1
-const int8_t encoder_table[16] PROGMEM = { 0, 0, -1, 0, 0, 0, 0, 1, 1, 0, 0, 0, 0, -1, 0, 0 }; // Half speed
+#define ENCODER_CHANGES 2
 #else
-//const int8_t encoder_table[16] PROGMEM = {0,0,0,0,0,0,0,0,1,0,0,0,0,-1,0,0}; // Quart speed
-//const int8_t encoder_table[16] PROGMEM = {0,1,0,0,-1,0,0,0,0,0,0,0,0,0,0,0}; // Quart speed
-const int8_t encoder_table[16] PROGMEM = { 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, -1, 0, 0, 1, 0 }; // Quart speed
+#define ENCODER_CHANGES 4
 #endif
 
-static fast8_t aEnc = 0;
-static fast8_t bEnc = 0;
-static fast8_t encoderLast = 0;
-
-void GUI::setEncoderA(fast8_t state) {
-    if (state == aEnc) {
+void GUI::setEncoder() {
+    uint16_t newBits = 0;
+    if (ControllerEncA::get()) {
+        newBits |= 0x02;
+    }
+    if (ControllerEncB::get()) {
+        newBits |= 0x01;
+    }
+    if (newBits == (encoderCurrent & 3)) { // nothing changed
         return;
     }
-    aEnc = state;
-    encoderLast = (encoderLast << 2) & 0x0F;
-    if (aEnc) {
-        encoderLast += 2;
-    }
-    if (bEnc) {
-        encoderLast++;
-    }
-    int8_t mod = pgm_read_byte(&encoder_table[encoderLast]) * ENCODER_DIRECTION;
-    if (mod > 0) {
-        nextKey();
-    } else if (mod < 0) {
-        previousKey();
-    }
-}
-
-void GUI::setEncoderB(fast8_t state) {
-    if (state == bEnc) {
-        return;
-    }
-    bEnc = state;
-    encoderLast = (encoderLast << 2) & 0x0F;
-    if (aEnc) {
-        encoderLast += 2;
-    }
-    if (bEnc) {
-        encoderLast++;
-    }
-    int8_t mod = pgm_read_byte(&encoder_table[encoderLast]) * ENCODER_DIRECTION;
-    if (mod > 0) {
-        nextKey();
-    } else if (mod < 0) {
-        previousKey();
+    newBits = ((encoderCurrent << 2) + newBits) & 0xf;
+    int8_t move = pgm_read_byte(&encoder_table[newBits]);
+    encoderCurrent = newBits;
+    encCounter += move;
+    uint8_t val = newBits & 0xf; //0x3f;
+    if (encCounter >= ENCODER_CHANGES) {
+        encCounter = 0;
+        if (ENCODER_DIRECTION == 1) {
+            GUI::nextKey();
+        } else {
+            GUI::previousKey();
+        }
+    } else if (encCounter <= -ENCODER_CHANGES) {
+        encCounter = 0;
+        if (ENCODER_DIRECTION == 1) {
+            GUI::previousKey();
+        } else {
+            GUI::nextKey();
+        }
     }
 }
 
@@ -458,12 +494,14 @@ void GUI::flashToString(char* dest, FSTRINGPARAM(text)) {
     }
     dest[pos] = 0;
 }
+
 void GUI::flashToStringLong(char* dest, FSTRINGPARAM(text), int32_t value) {
     fast8_t pos = 0;
     while (pos < MAX_COLS) {
         uint8_t c = HAL::readFlashByte(text++);
-        if (c == 0)
+        if (c == 0) {
             break;
+        }
         if (c == '@') {
             uint8_t dig = 0;
             if (value < 0) {
@@ -483,6 +521,58 @@ void GUI::flashToStringLong(char* dest, FSTRINGPARAM(text), int32_t value) {
             while (*str && pos < MAX_COLS) {
                 dest[pos++] = *str;
                 str++;
+            }
+        } else {
+            dest[pos++] = c;
+        }
+    }
+    dest[pos] = 0;
+}
+
+void GUI::flashToStringFloat(char* dest, FSTRINGPARAM(text), float value, int digits) {
+    fast8_t pos = 0;
+    while (pos < MAX_COLS) {
+        uint8_t c = HAL::readFlashByte(text++);
+        if (c == 0) {
+            break;
+        }
+        if (c == '@') {
+            // Handle negative numbers
+            if (value < 0.0) {
+                dest[pos++] = '-';
+                value = -value;
+            }
+            value += pgm_read_float(&roundingTable[digits]); // for correct rounding
+
+            // Extract the integer part of the number and print it
+            uint32_t int_part = static_cast<uint32_t>(value);
+            float remainder = value - static_cast<float>(int_part);
+            uint8_t dig = 0;
+            char buf2[13]; // Assumes 8-bit chars plus zero byte.
+            char* str = &buf2[12];
+            buf2[12] = 0;
+            do {
+                unsigned long m = int_part;
+                int_part /= 10;
+                char c = m - 10 * int_part;
+                *--str = c + '0';
+                dig++;
+            } while (int_part);
+            while (*str && pos < MAX_COLS) {
+                dest[pos++] = *str;
+                str++;
+            }
+
+            // Print the decimal point, but only if there are digits beyond
+            if (digits > 0) {
+                dest[pos++] = '.';
+                // Extract digits from the remainder one at a time
+                while (digits-- > 0) {
+                    remainder *= 10.0;
+                    uint8_t toPrint = static_cast<uint8_t>(remainder);
+                    dest[pos++] = '0' + toPrint;
+                    remainder -= toPrint;
+                }
             }
         } else {
             dest[pos++] = c;
@@ -560,10 +650,16 @@ void GUI::setStatusP(FSTRINGPARAM(text), GUIStatusLevel lvl) {
         if (lvl == GUIStatusLevel::WARNING) {
             Printer::playDefaultSound(DefaultSounds::WARNING);
             push(warningScreen, status, GUIPageType::STATUS);
+            Com::promptStart(GUI::pop, Com::tWarning, status, false);
+            Com::promptButton(Com::tOk);
+            Com::promptShow();
         }
         if (lvl == GUIStatusLevel::ERROR) {
             Printer::playDefaultSound(DefaultSounds::ERROR);
             push(errorScreen, status, GUIPageType::STATUS);
+            Com::promptStart(GUI::pop, Com::tError, status, false);
+            Com::promptButton(Com::tOk);
+            Com::promptShow();
         }
     }
 }
@@ -588,9 +684,17 @@ void GUI::setStatus(char* text, GUIStatusLevel lvl) {
         }
         if (lvl == GUIStatusLevel::WARNING) {
             push(warningScreen, status, GUIPageType::STATUS);
+            Printer::playDefaultSound(DefaultSounds::WARNING);
+            push(warningScreen, status, GUIPageType::STATUS);
+            Com::promptStart(GUI::pop, Com::tWarning, status, false);
+            Com::promptButton(Com::tOk);
+            Com::promptShow();
         }
         if (lvl == GUIStatusLevel::ERROR) {
             push(errorScreen, status, GUIPageType::STATUS);
+            Com::promptStart(GUI::pop, Com::tError, status, false);
+            Com::promptButton(Com::tOk);
+            Com::promptShow();
         }
     }
 }
@@ -602,18 +706,41 @@ bool GUI::handleFloatValueAction(GUIAction& action, float& value, float min, flo
     }
     float orig = value;
     if (action == GUIAction::NEXT) {
-        value += nextActionRepeat * increment;
+        float calc = (nextActionRepeat * increment);
+        value = (value == min) ? increment * ::floorf((value + calc) / increment) : (value + calc);
         contentChanged = true;
-    }
-    if (action == GUIAction::PREVIOUS) {
-        value -= nextActionRepeat * increment;
+    } else if (action == GUIAction::PREVIOUS) {
+        float calc = (nextActionRepeat * increment);
+        value = (value == max) ? increment * ::ceilf((value - calc) / increment) : (value - calc);
         contentChanged = true;
     }
     if (value < min) {
         value = min;
-    }
-    if (value > max) {
+    } else if (value > max) {
         value = max;
+    } else if (std::signbit(orig) != std::signbit(value)) {
+        value = increment * std::roundf(value / increment);
+    }
+    return orig != value;
+}
+
+bool GUI::handleFloatValueAction(GUIAction& action, float& value, float increment) {
+    if (action == GUIAction::CLICK || action == GUIAction::BACK) {
+        GUI::pop();
+        return false;
+    }
+    float orig = value;
+    if (action == GUIAction::NEXT) {
+        float calc = (nextActionRepeat * increment);
+        value = increment * ::floorf((value + calc) / increment);
+        contentChanged = true;
+    } else if (action == GUIAction::PREVIOUS) {
+        float calc = (nextActionRepeat * increment);
+        value = increment * ::ceilf((value - calc) / increment);
+        contentChanged = true;
+    }
+    if (std::signbit(orig) != std::signbit(value)) {
+        value = increment * std::roundf(value / increment);
     }
     return orig != value;
 }
@@ -625,18 +752,21 @@ bool GUI::handleLongValueAction(GUIAction& action, int32_t& value, int32_t min, 
     }
     int32_t orig = value;
     if (action == GUIAction::NEXT) {
-        value += nextActionRepeat * increment;
+        int32_t calc = value + (nextActionRepeat * increment);
+        value = (value == min) ? increment * ((calc - std::signbit(calc) * (increment - 1)) / increment) : calc;
         contentChanged = true;
-    }
-    if (action == GUIAction::PREVIOUS) {
-        value -= nextActionRepeat * increment;
+    } else if (action == GUIAction::PREVIOUS) {
+        int32_t calc = value - (nextActionRepeat * increment);
+        value = (value == max) ? increment * ((calc + !std::signbit(calc) * (increment - 1)) / increment) : calc;
         contentChanged = true;
     }
     if (value < min) {
         value = min;
-    }
-    if (value > max) {
+    } else if (value > max) {
         value = max;
+    } else if (std::signbit(orig) != std::signbit(value)) {
+        int32_t calc = (std::labs(value) + (increment / 2));
+        value = (calc - (calc % increment)) * (std::signbit(value) ? -1 : 1);
     }
     return orig != value;
 }
@@ -659,7 +789,9 @@ void directAction(GUIAction action, void* data) {
     int opt = reinterpret_cast<int>(data);
     switch (opt) {
     case GUI_DIRECT_ACTION_HOME_ALL:
-        Motion1::homeAxes(0);
+        if (!Printer::isHoming()) {
+            Motion1::homeAxes(0);
+        }
         break;
     case GUI_DIRECT_ACTION_HOME_X:
     case GUI_DIRECT_ACTION_HOME_Y:
@@ -668,7 +800,9 @@ void directAction(GUIAction action, void* data) {
     case GUI_DIRECT_ACTION_HOME_A:
     case GUI_DIRECT_ACTION_HOME_B:
     case GUI_DIRECT_ACTION_HOME_C:
-        Motion1::homeAxes(axisBits[opt - GUI_DIRECT_ACTION_HOME_X]);
+        if (!Printer::isHoming()) {
+            Motion1::homeAxes(axisBits[opt - GUI_DIRECT_ACTION_HOME_X]);
+        }
         break;
     case GUI_DIRECT_ACTION_FACTORY_RESET:
         EEPROM::restoreEEPROMSettingsFromConfiguration();
@@ -701,37 +835,26 @@ void directAction(GUIAction action, void* data) {
     case GUI_DIRECT_ACTION_TOGGLE_LIGHT:
         Printer::caseLightMode = Printer::caseLightMode ? 0 : 1;
         break;
-    case GUI_DIRECT_ACTION_TOGGLE_SOUNDS:
-#if NUM_BEEPERS > 0
-        Printer::tonesEnabled = Printer::tonesEnabled ? 0 : 1;
-        for (size_t i = 0; i < NUM_BEEPERS; i++) {
-            beepers[i]->mute(!Printer::tonesEnabled);
-        }
-#endif
-        break;
     case GUI_DIRECT_ACTION_DISABLE_MOTORS:
         Motion1::waitForEndOfMoves();
         Printer::kill(true);
         break;
     case GUI_DIRECT_ACTION_MOUNT_SD_CARD:
 #if SDSUPPORT
-        sd.mount();
+        if (sd.state == SDState::SD_HAS_ERROR) {
+            sd.unmount(true);
+        }
+        sd.mount(true);
 #endif
         break;
-    case GUI_DIRECT_ACTION_STOP_SD_PRINT:
-#if SDSUPPORT
-        sd.stopPrint();
-#endif
+    case GUI_DIRECT_ACTION_STOP_PRINT:
+        Printer::stopPrint();
         break;
-    case GUI_DIRECT_ACTION_PAUSE_SD_PRINT:
-#if SDSUPPORT
-        sd.pausePrint(true);
-#endif
+    case GUI_DIRECT_ACTION_PAUSE_PRINT:
+        Printer::pausePrint();
         break;
-    case GUI_DIRECT_ACTION_CONTINUE_SD_PRINT:
-#if SDSUPPORT
-        sd.continuePrint(true);
-#endif
+    case GUI_DIRECT_ACTION_CONTINUE_PRINT:
+        Printer::continuePrint();
         break;
     case GUI_DIRECT_ACTION_POWERLOSS:
         Printer::handlePowerLoss();
@@ -756,6 +879,9 @@ void directAction(GUIAction action, void* data) {
         break;
     case GUI_DIRECT_ACTION_TOGGLE_PROBE_PAUSE:
         ZProbeHandler::setHeaterPause(!ZProbeHandler::getHeaterPause());
+        break;
+    case GUI_DIRECT_ACTION_TOGGLE_AUTORETRACTIONS:
+        Printer::setAutoretract(!Printer::isAutoretract(), true);
         break;
     }
 }

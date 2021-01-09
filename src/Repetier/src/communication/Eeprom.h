@@ -44,7 +44,7 @@
 #define EPR_BAUDRATE2 24             // Connection baudrate for second connector
 #define EPR_SELECTED_LANGUAGE 25     // Active language
 #define EPR_VERSION 26               // Version id for updates in EEPROM storage
-#define EPR_TONES_ENABLED 27         // Tones/sounds currently enabled
+#define EPR_TONE_VOLUME 27           // Tone volume, off if 0.
 #define EEPROM_PROTOCOL_VERSION 1    // Protocol version
 
 #define EPR_START_RESERVE 40
@@ -61,6 +61,13 @@ enum class EEPROMType {
     LONG = 2,
     INT = 3,
     BYTE = 4
+};
+
+enum class EEPROMMode {
+    REPORT = 0,
+    SET_VAR = 1,
+    STORE = 2,
+    READ = 3
 };
 
 class EEPROM {
@@ -82,12 +89,13 @@ class EEPROM {
     static void updateChecksum();
 
 public:
-    static fast8_t mode; // 0 = output, 1 = set var, 2 = store to eeprom, 3 = read from eeprom
+    static EEPROMMode mode;
 
     static void setSilent(bool s) { silent = s; }
     static void init();
     static void markChanged();
     static void initBaudrate();
+    static void setBaudrate(int32_t val);
     static void updateDerived();
     static void timerHandler(); // gets aclled every 100ms
     /** Reserve memory in eeprom to store data. sig and version

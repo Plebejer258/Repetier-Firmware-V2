@@ -28,6 +28,7 @@
 #undef STEPPER_TMC5160_SW_SPI
 #undef STEPPER_TMC2208_HW_UART
 #undef STEPPER_TMC2209_HW_UART
+#undef STEPPER_TMC2209_SW_UART
 
 #if IO_TARGET == IO_TARGET_CLASS_DEFINITION // declare variable
 
@@ -55,6 +56,10 @@
     extern TMCStepper2208Driver<stepPin, dirPin, enablePin, fclk> name; \
     typedef TMCStepper2208Driver<stepPin, dirPin, enablePin, fclk> name##Type;
 #define STEPPER_TMC2209_HW_UART(name, stepPin, dirPin, enablePin, serial, rsense, microsteps, currentMillis, stealth, hybridSpeed, slaveAddr, stallSensitivity, fclk, minEndstop, maxEndstop) \
+    extern TMC2209Stepper name##Inst; \
+    extern TMCStepper2209Driver<stepPin, dirPin, enablePin, fclk> name; \
+    typedef TMCStepper2209Driver<stepPin, dirPin, enablePin, fclk> name##Type;
+#define STEPPER_TMC2209_SW_UART(name, stepPin, dirPin, enablePin, rxPin, txPin, rsense, microsteps, currentMillis, stealth, hybridSpeed, slaveAddr, stallSensitivity, fclk, minEndstop, maxEndstop) \
     extern TMC2209Stepper name##Inst; \
     extern TMCStepper2209Driver<stepPin, dirPin, enablePin, fclk> name; \
     typedef TMCStepper2209Driver<stepPin, dirPin, enablePin, fclk> name##Type;
@@ -95,7 +100,10 @@
     TMCStepper2208Driver<stepPin, dirPin, enablePin, fclk> name(&minEndstop, &maxEndstop, &name##Inst, microsteps, currentMillis, stealth, hybridSpeed);
 #define STEPPER_TMC2209_HW_UART(name, stepPin, dirPin, enablePin, serial, rsense, microsteps, currentMillis, stealth, hybridSpeed, slaveAddr, stallSensitivity, fclk, minEndstop, maxEndstop) \
     TMC2209Stepper name##Inst(&serial, rsense, slaveAddr); \
-    TMCStepper2209Driver<stepPin, dirPin, enablePin, fclk> name(&minEndstop, &maxEndstop, &name##Inst, microsteps, currentMillis, stealth, hybridSpeed, stallSensitivity);
+    TMCStepper2209Driver<stepPin, dirPin, enablePin, fclk> name(&minEndstop, &maxEndstop, &name##Inst, microsteps, currentMillis, stealth, hybridSpeed, stallSensitivity, false);
+#define STEPPER_TMC2209_SW_UART(name, stepPin, dirPin, enablePin, rxPin, txPin, rsense, microsteps, currentMillis, stealth, hybridSpeed, slaveAddr, stallSensitivity, fclk, minEndstop, maxEndstop) \
+    TMC2209Stepper name##Inst(rxPin, txPin, rsense, slaveAddr); \
+    TMCStepper2209Driver<stepPin, dirPin, enablePin, fclk> name(&minEndstop, &maxEndstop, &name##Inst, microsteps, currentMillis, stealth, hybridSpeed, stallSensitivity, true);
 #define STEPPER_MIRROR2(name, motor1, motor2, minEndstop, maxEndstop) \
     Mirror2StepperDriver name(&motor1, &motor2, &minEndstop, &maxEndstop);
 #define STEPPER_MIRROR3(name, motor1, motor2, motor3, minEndstop, maxEndstop) \
@@ -117,11 +125,24 @@
     name.eepromReserve();
 #define STEPPER_TMC5160_SW_SPI(name, stepPin, dirPin, enablePin, mosiPin, misoPin, sckPin, csPin, rsense, chainPos, microsteps, currentMillis, stealth, hybridSpeed, stallSensitivity, fclk, minEndstop, maxEndstop) \
     name.eepromReserve();
+#if defined(SAMD51_BOARD) || defined(ARDUINO_ARCH_STM32)
 #define STEPPER_TMC2208_HW_UART(name, stepPin, dirPin, enablePin, serial, rsense, microsteps, currentMillis, stealth, hybridSpeed, fclk, minEndstop, maxEndstop) \
     serial.begin(115200); \
     name.eepromReserve();
 #define STEPPER_TMC2209_HW_UART(name, stepPin, dirPin, enablePin, serial, rsense, microsteps, currentMillis, stealth, hybridSpeed, slaveAddr, stallSensitivity, fclk, minEndstop, maxEndstop) \
-    serial.begin(500000); \
+    serial.begin(115200); \
+    name.eepromReserve();
+#else
+#define STEPPER_TMC2208_HW_UART(name, stepPin, dirPin, enablePin, serial, rsense, microsteps, currentMillis, stealth, hybridSpeed, fclk, minEndstop, maxEndstop) \
+    serial.begin(115200); \
+    serial.setInterruptPriority(5); \
+    name.eepromReserve();
+#define STEPPER_TMC2209_HW_UART(name, stepPin, dirPin, enablePin, serial, rsense, microsteps, currentMillis, stealth, hybridSpeed, slaveAddr, stallSensitivity, fclk, minEndstop, maxEndstop) \
+    serial.begin(115200); \
+    serial.setInterruptPriority(5); \
+    name.eepromReserve();
+#endif
+#define STEPPER_TMC2209_SW_UART(name, stepPin, dirPin, enablePin, rxPin, txPin, rsense, microsteps, currentMillis, stealth, hybridSpeed, slaveAddr, stallSensitivity, fclk, minEndstop, maxEndstop) \
     name.eepromReserve();
 
 #elif IO_TARGET == IO_TARGET_INIT_LATE // Init drivers at startup
@@ -139,6 +160,9 @@
 #define STEPPER_TMC2208_HW_UART(name, stepPin, dirPin, enablePin, serial, rsense, microsteps, currentMillis, stealth, hybridSpeed, fclk, minEndstop, maxEndstop) \
     name.init();
 #define STEPPER_TMC2209_HW_UART(name, stepPin, dirPin, enablePin, serial, rsense, microsteps, currentMillis, stealth, hybridSpeed, slaveAddr, stallSensitivity, fclk, minEndstop, maxEndstop) \
+    name.init();
+#define STEPPER_TMC2209_SW_UART(name, stepPin, dirPin, enablePin, rxPin, txPin, rsense, microsteps, currentMillis, stealth, hybridSpeed, slaveAddr, stallSensitivity, fclk, minEndstop, maxEndstop) \
+    SoftwareSerial::setInterruptPriority(1, 0); \
     name.init();
 #define STEPPER_MIRROR2(name, motor1, motor2, minEndstop, maxEndstop) \
     name.init();
@@ -167,7 +191,10 @@
 #define STEPPER_TMC2209_HW_UART(name, stepPin, dirPin, enablePin, serial, rsense, microsteps, currentMillis, stealth, hybridSpeed, slaveAddr, stallSensitivity, fclk, minEndstop, maxEndstop) \
     name.reset(microsteps, currentMillis, stealth, hybridSpeed, stallSensitivity);
 
-#elif IO_TARGET == IO_TARGET_TOOLS_TEMPLATES
+#define STEPPER_TMC2209_SW_UART(name, stepPin, dirPin, enablePin, rxPin, txPin, rsense, microsteps, currentMillis, stealth, hybridSpeed, slaveAddr, stallSensitivity, fclk, minEndstop, maxEndstop) \
+    name.reset(microsteps, currentMillis, stealth, hybridSpeed, stallSensitivity);
+
+#elif IO_TARGET == IO_TARGET_TEMPLATES
 
 #define STEPPER_ADJUST_RESOLUTION(name, driver, from, to) \
     template class AdjustResolutionStepperDriver<driver##Type>;
@@ -182,6 +209,8 @@
 #define STEPPER_TMC2208_HW_UART(name, stepPin, dirPin, enablePin, serial, rsense, microsteps, currentMillis, stealth, hybridSpeed, fclk, minEndstop, maxEndstop) \
     template class TMCStepper2208Driver<stepPin, dirPin, enablePin, fclk>;
 #define STEPPER_TMC2209_HW_UART(name, stepPin, dirPin, enablePin, serial, rsense, microsteps, currentMillis, stealth, hybridSpeed, slaveAddr, stallSensitivity, fclk, minEndstop, maxEndstop) \
+    template class TMCStepper2209Driver<stepPin, dirPin, enablePin, fclk>;
+#define STEPPER_TMC2209_SW_UART(name, stepPin, dirPin, enablePin, rxPin, txPin, rsense, microsteps, currentMillis, stealth, hybridSpeed, slaveAddr, stallSensitivity, fclk, minEndstop, maxEndstop) \
     template class TMCStepper2209Driver<stepPin, dirPin, enablePin, fclk>;
 
 #elif IO_TARGET == IO_TARGET_UPDATE_DERIVED // call updatedDerived to activate new settings
@@ -198,6 +227,8 @@
     name.init();
 #define STEPPER_TMC2209_HW_UART(name, stepPin, dirPin, enablePin, serial, rsense, microsteps, currentMillis, stealth, hybridSpeed, slaveAddr, stallSensitivity, fclk, minEndstop, maxEndstop) \
     name.init();
+#define STEPPER_TMC2209_SW_UART(name, stepPin, dirPin, enablePin, rxPin, txPin, rsense, microsteps, currentMillis, stealth, hybridSpeed, slaveAddr, stallSensitivity, fclk, minEndstop, maxEndstop) \
+    name.init();
 
 #elif IO_TARGET == IO_TARGET_500MS
 
@@ -212,6 +243,8 @@
 #define STEPPER_TMC2208_HW_UART(name, stepPin, dirPin, enablePin, serial, rsense, microsteps, currentMillis, stealth, hybridSpeed, fclk, minEndstop, maxEndstop) \
     name.timer500ms();
 #define STEPPER_TMC2209_HW_UART(name, stepPin, dirPin, enablePin, serial, rsense, microsteps, currentMillis, stealth, hybridSpeed, slaveAddr, stallSensitivity, fclk, minEndstop, maxEndstop) \
+    name.timer500ms();
+#define STEPPER_TMC2209_SW_UART(name, stepPin, dirPin, enablePin, rxPin, txPin, rsense, microsteps, currentMillis, stealth, hybridSpeed, slaveAddr, stallSensitivity, fclk, minEndstop, maxEndstop) \
     name.timer500ms();
 
 #endif
@@ -236,6 +269,9 @@
 #endif
 #ifndef STEPPER_TMC2209_HW_UART
 #define STEPPER_TMC2209_HW_UART(name, stepPin, dirPin, enablePin, serial, rsense, microsteps, currentMillis, stealth, hybridSpeed, slaveAddr, stallSensitivity, fclk, minEndstop, maxEndstop)
+#endif
+#ifndef STEPPER_TMC2209_SW_UART
+#define STEPPER_TMC2209_SW_UART(name, stepPin, dirPin, enablePin, rxPin, txPin, rsense, microsteps, currentMillis, stealth, hybridSpeed, slaveAddr, stallSensitivity, fclk, minEndstop, maxEndstop)
 #endif
 #ifndef STEPPER_MIRROR2
 #define STEPPER_MIRROR2(name, motor1, motor2, minEndstop, maxEndstop)

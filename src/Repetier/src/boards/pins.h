@@ -84,10 +84,15 @@ inline void memcopy4(void* dest, void* source) {
 #define SAMD51_BOARD 1
 #include "SAMD51/pins.h"
 
-#elif MOTHERBOARD >= 2000 && MOTHERBOARD < 3000
+#elif MOTHERBOARD >= 2000 && MOTHERBOARD < 2500
 
 #define M0_BOARD
 #include "M0/pins.h"
+
+#elif MOTHERBOARD >= 2500 && MOTHERBOARD < 3000
+
+#define STM32F1_BOARD
+#include "STM32F1/pins.h"
 
 #elif MOTHERBOARD >= 3000 && MOTHERBOARD < 3500
 
@@ -112,6 +117,9 @@ inline void memcopy4(void* dest, void* source) {
 #ifdef M0_BOARD
 #include "M0/HAL.h"
 #endif
+#ifdef STM32F1_BOARD
+#include "STM32F1/HAL.h"
+#endif
 #ifdef STM32F4_BOARD
 #include "STM32F4/HAL.h"
 #endif
@@ -134,6 +142,47 @@ inline void memcopy4(void* dest, void* source) {
 #endif
 #ifndef UI_ENCODER_B
 #define UI_ENCODER_B -1
+#endif
+#ifndef MAX_VFAT_ENTRIES
+#ifdef AVR_BOARD
+#define MAX_VFAT_ENTRIES (2)
+#else
+#define MAX_VFAT_ENTRIES (3)
+#endif
+#endif
+/** Total size of the buffer used to store the long filenames */
+#define LONG_FILENAME_LENGTH (13 * MAX_VFAT_ENTRIES + 1)
+#define SD_MAX_FOLDER_DEPTH 2
+
+#if UI_DISPLAY_TYPE != DISPLAY_U8G
+#if (defined(USER_KEY1_PIN) && (USER_KEY1_PIN == UI_DISPLAY_D5_PIN || USER_KEY1_PIN == UI_DISPLAY_D6_PIN || USER_KEY1_PIN == UI_DISPLAY_D7_PIN)) || (defined(USER_KEY2_PIN) && (USER_KEY2_PIN == UI_DISPLAY_D5_PIN || USER_KEY2_PIN == UI_DISPLAY_D6_PIN || USER_KEY2_PIN == UI_DISPLAY_D7_PIN)) || (defined(USER_KEY3_PIN) && (USER_KEY3_PIN == UI_DISPLAY_D5_PIN || USER_KEY3_PIN == UI_DISPLAY_D6_PIN || USER_KEY3_PIN == UI_DISPLAY_D7_PIN)) || (defined(USER_KEY4_PIN) && (USER_KEY4_PIN == UI_DISPLAY_D5_PIN || USER_KEY4_PIN == UI_DISPLAY_D6_PIN || USER_KEY4_PIN == UI_DISPLAY_D7_PIN))
+#error You cannot use DISPLAY_D5_PIN, DISPLAY_D6_PIN or DISPLAY_D7_PIN for "User Keys" with character LCD display
+#endif
+#endif
+
+#ifndef SDCARDDETECT
+#define SDCARDDETECT -1
+#endif
+
+#ifndef SDSUPPORT
+#if FEATURE_CONTROLLER == CONTROLLER_REPRAPDISCOUNT_GLCD || FEATURE_CONTROLLER == CONTROLLER_FELIX_DUE \
+    || FEATURE_CONTROLLER == CONTROLLER_ORCABOTXXLPRO2 || FEATURE_CONTROLLER == CONTROLLER_ENDER_3_12864 \
+    || FEATURE_CONTROLLER == CONTROLLER_RADDS || FEATURE_CONTROLLER == CONTROLLER_SMARTRAMPS
+#define SDSUPPORT 1
+#endif
+#endif
+
+#ifndef SDSUPPORT
+#define SDSUPPORT 0
+#endif
+
+#ifndef SDCARDDETECTINVERTED
+#define SDCARDDETECTINVERTED 0
+#endif
+
+#include "communication/gcode.h"
+#if SDSUPPORT  
+#include "SdFat/src/SdFat.h"
 #endif
 
 #endif

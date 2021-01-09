@@ -43,6 +43,7 @@ extern "C" char* sbrk(int i);
 char HAL::virtualEeprom[EEPROM_BYTES] = { 0, 0, 0, 0, 0, 0, 0 };
 bool HAL::wdPinged = true;
 uint8_t HAL::i2cError = 0;
+BootReason HAL::startReason = BootReason::UNKNOWN;
 
 volatile uint8_t HAL::insideTimer1 = 0;
 
@@ -257,6 +258,11 @@ void HAL::setupTimer() {
 #endif
 }
 
+// Called within checkForPeriodicalActions (main loop, more or less) 
+// as fast as possible
+void HAL::handlePeriodical() {
+
+}
 struct PWMChannel {
     bool used;
     const PinDescription* pwm; // timer
@@ -559,41 +565,39 @@ void HAL::setHardwareFrequency(int id, uint32_t frequency) {
     // TODO: handle HAL pwm frequency change requests
     //
 }
-// Initialize ADC channels
-#define ANALOG_PIN_TO_CHANNEL(p) (p < 62 ? p - 46 : p - 67)
-int32_t analogValues[16] = { 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0 };
-const PinDescription* analogEnabled[16] = { nullptr, nullptr, nullptr, nullptr, nullptr, nullptr, nullptr, nullptr, nullptr, nullptr, nullptr, nullptr, nullptr, nullptr, nullptr, nullptr };
+
+int32_t analogValues[NUM_ANALOG_INPUTS] = { 0 };
+const PinDescription* analogEnabled[NUM_ANALOG_INPUTS] = { nullptr };
+
+Adc* analogAdcMap[NUM_ANALOG_INPUTS]; // = {ADC0,ADC0,ADC0};
+
 void reportAnalog() {
-    for (int i = 0; i < 16; i++) {
+    for (int i = 0; i < NUM_ANALOG_INPUTS; i++) {
         if (analogEnabled[i]) {
             Com::printF("Analog ", i);
             Com::printFLN(" = ", analogValues[i]);
         }
     }
 }
-Adc* analogAdcMap[16] = {
-    ADC0, // D67
-    ADC0,
-    ADC0,
-    ADC1,
-    ADC1,
-    ADC1,
-    ADC1,
-    ADC1, // D74
-    ADC1, // D54
-    ADC1,
-    ADC1,
-    ADC1,
-    ADC1,
-    ADC0,
-    ADC0,
-    ADC0 // D61
-};
+void HAL::analogInit(void) {
+    //    #define ANALOG_TO_DIGITAL_PIN(p) (p < NUM_ANALOG_INPUTS ? p + PIN_A0 : -1 )
+    for (int i = 0; i < NUM_ANALOG_INPUTS; i++) {
+        int Channel = ANALOG_TO_DIGITAL_PIN(i);
+        const PinDescription* pd = &g_APinDescription[Channel];
+        uint32_t attr = pd->ulPinAttribute;
+        if (attr & PIN_ATTR_ANALOG) {
+            analogAdcMap[i] = { ADC0 };
+        } else {
+            analogAdcMap[i] = { ADC1 };
+        }
+    }
+}
+
 static int analogConvertPos = -1;
 void HAL::analogStart(void) {
     // Analog channels being used are already enabled. Start conversion
     // only if we have any analog sources.
-    for (int i = 0; i < 16; i++) {
+    for (int i = 0; i < NUM_ANALOG_INPUTS; i++) {
         if (analogEnabled[i] != nullptr) {
             analogConvertPos = i;
             // Set ADC clock to 48MHz clock
@@ -647,14 +651,14 @@ inline void analogISRFunction() {
     int count = 0;
     do {
         count++;
-        if (++analogConvertPos == 16) {
+        if (++analogConvertPos == NUM_ANALOG_INPUTS) {
             // Process data
 #undef IO_TARGET
 #define IO_TARGET IO_TARGET_ANALOG_INPUT_LOOP
 #include "io/redefine.h"
             analogConvertPos = 0;
         }
-    } while (analogEnabled[analogConvertPos] == nullptr && count < 16);
+    } while (analogEnabled[analogConvertPos] == nullptr && count < NUM_ANALOG_INPUTS);
 
     // start new conversion
     if (analogEnabled[analogConvertPos] != nullptr) {
@@ -681,7 +685,7 @@ void ADC1_1_Handler(void) {
 }
 void HAL::analogEnable(int channel) {
     int cNum = ANALOG_PIN_TO_CHANNEL(channel);
-    if (cNum < 0 || cNum >= 16) {
+    if (cNum < 0 || cNum >= NUM_ANALOG_INPUTS) {
         return;
     }
     pinPeripheral(channel, PIO_ANALOG);
@@ -693,7 +697,7 @@ void HAL::analogEnable(int channel) {
 
 int HAL::analogRead(int pin) {
     int cNum = ANALOG_PIN_TO_CHANNEL(pin);
-    if (cNum < 0 || cNum >= 16) { // protect for config errors
+    if (cNum < 0 || cNum >= NUM_ANALOG_INPUTS) { // protect for config errors
         return 0;
     }
     return analogValues[cNum];
@@ -719,63 +723,73 @@ void HAL::importEEPROM() {
 #endif
 
 millis_t eprSyncTime = 0; // in sync
-SdFile eepromFile;
-void HAL::syncEEPROM() { // store to disk if changed
-    millis_t time = millis();
-
-    if (eprSyncTime && (time - eprSyncTime > 15000)) { // Buffer writes only every 15 seconds to pool writes
-        eprSyncTime = 0;
-        bool failed = false;
-        if (!sd.sdactive) { // not mounted
-            if (eepromFile.isOpen())
+sd_file_t eepromFile;
+void HAL::syncEEPROM() {                                     // store to disk if changed
+    if (eprSyncTime && (millis() - eprSyncTime > 15000ul)) { // Buffer writes only every 15 seconds to pool writes
+        eprSyncTime = 0ul;
+        if (sd.state < SDState::SD_MOUNTED) { // not mounted
+            if (eepromFile.isOpen()) {
                 eepromFile.close();
-            Com::printErrorF("Could not write eeprom to sd card - no sd card mounted");
-            Com::println();
+            }
+            Com::printErrorFLN(PSTR("Could not write eeprom to sd card - no sd card mounted"));
             return;
         }
 
-        if (!eepromFile.seekSet(0))
-            failed = true;
-
-        if (!failed && eepromFile.write(virtualEeprom, EEPROM_BYTES) != EEPROM_BYTES)
-            failed = true;
-
-        if (failed) {
-            Com::printErrorF("Could not write eeprom to sd card");
-            Com::println();
+        eepromFile.rewind();
+        if ((eepromFile.write(virtualEeprom, EEPROM_BYTES) != EEPROM_BYTES
+             || !eepromFile.sync())) {
+            Com::printErrorFLN(PSTR("Could not write eeprom to sd card"));
+            sd.printIfCardErrCode();
         }
     }
 }
 
 void HAL::importEEPROM() {
-    if (eepromFile.isOpen())
-        eepromFile.close();
-    if (!eepromFile.open("eeprom.bin", O_RDWR | O_CREAT | O_SYNC) || eepromFile.read(virtualEeprom, EEPROM_BYTES) != EEPROM_BYTES) {
-        Com::printFLN(Com::tOpenFailedFile, "eeprom.bin");
-    } else {
-        Com::printFLN("EEPROM read from sd card.");
+    int readBytes = 0;
+    if (!eepromFile.open("eeprom.bin", O_RDWR | O_CREAT | O_SYNC)
+        || ((readBytes = eepromFile.read(virtualEeprom, EEPROM_BYTES)) != EEPROM_BYTES
+            && readBytes)) { // Sometimes we have a 0 byte eeprom.bin
+        Com::printFLN(Com::tOpenFailedFile, PSTR("eeprom.bin"));
     }
-    EEPROM::readDataFromEspi::beginEPROM();
+    EEPROM::readDataFromEEPROM();
+    if (eprSyncTime) {
+        eprSyncTime = HAL::timeInMilliseconds() | 1UL; // Reset any sync timer
+    }
 }
 
 #endif
 
 // Print apparent cause of start/restart
 void HAL::showStartReason() {
-    uint8_t mcu = REG_RSTC_RCAUSE;
-    if (mcu & RSTC_RCAUSE_POR) {
-        Com::printInfoFLN(Com::tPowerUp);
-    }
-    // this is return from backup mode on SAM
-    if (mcu & (RSTC_RCAUSE_BODCORE | RSTC_RCAUSE_BODVDD)) {
+    if (startReason == BootReason::BROWNOUT) {
         Com::printInfoFLN(Com::tBrownOut);
-    }
-    if (mcu & RSTC_RCAUSE_WDT) {
+    } else if (startReason == BootReason::WATCHDOG_RESET) {
         Com::printInfoFLN(Com::tWatchdog);
+    } else if (startReason == BootReason::SOFTWARE_RESET) {
+        Com::printInfoFLN(PSTR("Software reset"));
+    } else if (startReason == BootReason::POWER_UP) {
+        Com::printInfoFLN(Com::tPowerUp);
+    } else if (startReason == BootReason::EXTERNAL_PIN) {
+        Com::printInfoFLN(PSTR("External reset pin reset"));
+    } else {
+        Com::printInfoFLN(PSTR("Unknown reset reason"));
     }
-    Com::printInfoFLN(Com::tSoftwareReset);
-    if (mcu & RSTC_RCAUSE_EXT) {
-        Com::printInfoFLN(Com::tExternalReset);
+}
+void HAL::updateStartReason() {
+    uint8_t mcu = REG_RSTC_RCAUSE;
+    if (mcu & (RSTC_RCAUSE_BODCORE | RSTC_RCAUSE_BODVDD)) {
+        // this is return from backup mode on SAM
+        startReason = BootReason::BROWNOUT;
+    } else if (mcu & RSTC_RCAUSE_WDT) {
+        startReason = BootReason::WATCHDOG_RESET;
+    } else if (mcu & RSTC_RCAUSE_EXT) {
+        startReason = BootReason::EXTERNAL_PIN;
+    } else if (mcu & RSTC_RCAUSE_SYST) {
+        startReason = BootReason::SOFTWARE_RESET;
+    } else if (mcu & RSTC_RCAUSE_POR) {
+        startReason = BootReason::POWER_UP;
+    } else {
+        startReason = BootReason::UNKNOWN;
     }
 }
 
@@ -1091,10 +1105,12 @@ void watchdogSetup(void) {
 
 #if NUM_BEEPERS > 0
 void TC3_Handler(void) {
+    static bool beeperIRQPhase = true;
     TONE_TC->COUNT16.INTFLAG.bit.MC0 = 1; // Clear the interrupt
 #undef IO_TARGET
 #define IO_TARGET IO_TARGET_BEEPER_LOOP
 #include "io/redefine.h"
+    beeperIRQPhase = !beeperIRQPhase;
 }
 #endif
 

@@ -126,11 +126,14 @@ public:
 #define PRINTER_FLAG2_JAMCONTROL_DISABLED 32
 #define PRINTER_FLAG2_HOMING 64
 #define PRINTER_FLAG2_ALL_E_MOTORS 128 // Set all e motors flag
+#define PRINTER_FLAG3_AUTOREPORT_SD 4  // auto reports current file byte pos
 #define PRINTER_FLAG3_PRINTING 8       // set explicitly with M530
 #define PRINTER_FLAG3_AUTOREPORT_TEMP 16
 #define PRINTER_FLAG3_SUPPORTS_STARTSTOP 32
 #define PRINTER_FLAG3_DOOR_OPEN 64
+#define PRINTER_FLAG3_NATIVE_USB 128
 
+#define PRINTER_REPORT_FLAG_ENDSTOPS 1 // report end stop state as soon as possible
 // List of possible interrupt events (1-255 allowed)
 #define PRINTER_INTERRUPT_EVENT_JAM_DETECTED 1
 #define PRINTER_INTERRUPT_EVENT_JAM_SIGNAL0 2
@@ -254,28 +257,34 @@ public:
     static uint8_t relativeCoordinateMode;         ///< Determines absolute (false) or relative Coordinates (true).
     static uint8_t relativeExtruderCoordinateMode; ///< Determines Absolute or Relative E Codes while in Absolute Coordinates mode. E is always relative in Relative Coordinates mode.
 
-    static bool failedMode;              // In failed mode only M110 and M999 is working
-    static uint8_t unitIsInches;         ///< true if we compute in inces and not mm
-    static uint8_t rescueOn;             // 1 is rescue is enabled
-    static uint8_t flag0, flag1;         // 1 = stepper disabled, 2 = use external extruder interrupt, 4 = temp Sensor defect, 8 = homed
-    static uint8_t flag2, flag3;         // Some more flags
-    static uint32_t interval;            ///< Last step duration in ticks.
-    static uint32_t timer;               ///< used for acceleration/deceleration timing
-    static uint32_t stepNumber;          ///< Step number in current move.
-    static millis_t lastTempReport;      ///< Time o flast temperature report for autoreport temperatures
-    static int32_t printingTime;         ///< Printing time in seconds
-    static float extrudeMultiplyError;   ///< Accumulated error during extrusion
-    static float extrusionFactor;        ///< Extrusion multiply factor
-    static uint16_t rescuePos;           // EEPROM address for rescue
-    static fast8_t safetyParked;         /// True if moved to a safety position to protect print
-    static float feedrate;               ///< Last requested feedrate.
-    static int feedrateMultiply;         ///< Multiplier for feedrate in percent (factor 1 = 100)
-    static unsigned int extrudeMultiply; ///< Flow multiplier in percent (factor 1 = 100)
-    static uint8_t interruptEvent;       ///< Event generated in interrupts that should/could be handled in main thread
-    static speed_t vMaxReached;          ///< Maximum reached speed
-    static uint32_t msecondsPrinting;    ///< Milliseconds of printing time (means time with heated extruder)
-    static float filamentPrinted;        ///< mm of filament printed since counting started
-    static float filamentPrintedTotal;   ///< Total amount of filament printed in meter
+    static bool failedMode;                         // In failed mode only M110 and M999 is working
+    static PromptDialogCallback activePromptDialog; ///< Dialog ID that is active
+    static bool promptSupported;                    ///< At least one connecte dhost supports host prompts
+    static uint8_t unitIsInches;                    ///< true if we compute in inces and not mm
+    static uint8_t rescueOn;                        // 1 is rescue is enabled
+    static uint8_t flag0, flag1;                    // 1 = stepper disabled, 2 = use external extruder interrupt, 4 = temp Sensor defect, 8 = homed
+    static uint8_t flag2, flag3;                    // Some more flags
+    static uint8_t reportFlag;                      ///< Report several staus infos on next loop
+    static uint32_t interval;                       ///< Last step duration in ticks.
+    static uint32_t timer;                          ///< used for acceleration/deceleration timing
+    static uint32_t stepNumber;                     ///< Step number in current move.
+    static millis_t lastTempReport;                 ///< Time of last temperature report for autoreporting temperatures
+    static millis_t autoTempReportPeriodMS;         ///< Configurable delay between autoreports in ms. Default 1000ms.
+    static millis_t lastSDReport;                   ///< Time of last SD read position report for autoreporting SD position
+    static millis_t autoSDReportPeriodMS;           ///< Configurable delay between SD autoreports in ms. Default off.
+    static int32_t printingTime;                    ///< Printing time in seconds
+    static float extrudeMultiplyError;              ///< Accumulated error during extrusion
+    static float extrusionFactor;                   ///< Extrusion multiply factor
+    static uint16_t rescuePos;                      // EEPROM address for rescue
+    static fast8_t safetyParked;                    /// True if moved to a safety position to protect print
+    static float feedrate;                          ///< Last requested feedrate.
+    static int feedrateMultiply;                    ///< Multiplier for feedrate in percent (factor 1 = 100)
+    static unsigned int extrudeMultiply;            ///< Flow multiplier in percent (factor 1 = 100)
+    static uint8_t interruptEvent;                  ///< Event generated in interrupts that should/could be handled in main thread
+    static speed_t vMaxReached;                     ///< Maximum reached speed
+    static uint32_t msecondsPrinting;               ///< Milliseconds of printing time (means time with heated extruder)
+    static float filamentPrinted;                   ///< mm of filament printed since counting started
+    static float filamentPrintedTotal;              ///< Total amount of filament printed in meter
 #if ENABLE_BACKLASH_COMPENSATION || defined(DOXYGEN)
     static float backlashX;
     static float backlashY;
@@ -295,7 +304,7 @@ public:
 
     static void handleInterruptEvent();
 
-    static uint8_t tonesEnabled;
+    static ufast8_t toneVolume;
 
     static INLINE void setInterruptEvent(uint8_t evt, bool highPriority) {
         if (highPriority || interruptEvent == 0)
@@ -361,6 +370,18 @@ public:
     static INLINE void debugReset(uint8_t flags) {
         setDebugLevel(debugLevel & ~flags);
     }
+
+    static INLINE bool isReportFlag(uint8_t flags) {
+        return (reportFlag & flags);
+    }
+
+    static INLINE void reportFlagSet(uint8_t flags) {
+        reportFlag |= flags;
+    }
+
+    static INLINE void reportFlagReset(uint8_t flags) {
+        reportFlag = (reportFlag & ~flags);
+    }
 #if AUTOMATIC_POWERUP
     static void enablePowerIfNeeded();
 #endif
@@ -393,6 +414,14 @@ public:
 
     static INLINE void setAutoreportTemp(uint8_t b) {
         flag3 = (b ? flag3 | PRINTER_FLAG3_AUTOREPORT_TEMP : flag3 & ~PRINTER_FLAG3_AUTOREPORT_TEMP);
+    }
+
+    static INLINE uint8_t isAutoreportSD() {
+        return flag3 & PRINTER_FLAG3_AUTOREPORT_SD;
+    }
+
+    static INLINE void setAutoreportSD(uint8_t b) {
+        flag3 = (b ? flag3 | PRINTER_FLAG3_AUTOREPORT_SD : flag3 & ~PRINTER_FLAG3_AUTOREPORT_SD);
     }
 
     static INLINE uint8_t isAllKilled() {
@@ -468,9 +497,11 @@ public:
         return flag2 & PRINTER_FLAG2_AUTORETRACT;
     }
 
-    static INLINE void setAutoretract(uint8_t b) {
-        flag2 = (b ? flag2 | PRINTER_FLAG2_AUTORETRACT : flag2 & ~PRINTER_FLAG2_AUTORETRACT);
-        Com::printFLN(PSTR("Autoretract:"), b);
+    static INLINE void setAutoretract(uint8_t b, bool silent = false) {
+        flag2 = (b ? flag2 | PRINTER_FLAG2_AUTORETRACT : flag2 & ~PRINTER_FLAG2_AUTORETRACT); 
+        if (!silent) {
+            Com::printFLN(PSTR("Autoretract:"), b);
+        }
     }
 
     static INLINE uint8_t isPrinting() {
@@ -534,7 +565,12 @@ public:
         flag2 = (b ? flag2 | PRINTER_FLAG2_JAMCONTROL_DISABLED : flag2 & ~PRINTER_FLAG2_JAMCONTROL_DISABLED);
         Com::printFLN(PSTR("Jam control disabled:"), b);
     }
-
+    static INLINE void setNativeUSB(bool yes) {
+        flag3 = (yes ? flag3 | PRINTER_FLAG3_NATIVE_USB : flag3 & ~PRINTER_FLAG3_NATIVE_USB);
+    }
+    static INLINE bool isNativeUSB() {
+        return flag3 & PRINTER_FLAG3_NATIVE_USB;
+    }
     static INLINE void toggleAnimation() {
         setAnimation(!isAnimation());
     }

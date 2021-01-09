@@ -17,7 +17,8 @@ static_assert(numMotorNames == NUM_MOTORS, "NUM_MOTORS not defined correctly");
 
 int StepperDriverBase::motorIndex() {
     for (fast8_t i = 0; i < NUM_MOTORS; i++) {
-        if (this == Motion1::drivers[i]) {
+        if (this == Motion1::drivers[i]
+            || (this->parent == Motion1::drivers[i])) {
             return i;
         }
     }
@@ -132,7 +133,7 @@ void ProgrammableStepperBase::processEEPROM(uint8_t flags) {
 #endif
 #if STORE_MOTOR_STALL_SENSITIVITY
     //Note, flag 32 is stallguard 4, we don't use that flag for anything else yet, other than a small change in eeprom text.
-    if (flags & 16 && stallguardSensitivity != -128) {
+    if (flags & 16 && hasStallguard()) {
         EEPROM::handleInt(eprStart + PSB_STALL_SENSITIVITY_POS, (flags & 32) ? Com::tMotorStallSensitivity255 : Com::tMotorStallSensitivity64, stallguardSensitivity);
     }
 #endif
@@ -147,15 +148,15 @@ void reportTMC2130(TMC2130Stepper* driver, ProgrammableStepperBase* b, int level
         break;
     case 1:
         Com::printFLN(Com::tMotorNoConnection);
-        break;
+        return;
     case 2:
         Com::printFLN(Com::tMotorNoPower);
         break;
     }
     Com::printFLN(Com::tMotorEnabledColon, driver->isEnabled(), BoolFormat::YESNO);
-    Com::printF(Com::tMotorRMSCurrentMA, driver->rms_current());
+    Com::printF(Com::tMotorRMSCurrentMAColon, driver->rms_current());
     Com::printFLN(Com::tMotorSpaceSetColonSpace, b->getCurrentMillis());
-    Com::printFLN(Com::tMotorMaxCurrentMA, 1.4142 * driver->rms_current(), 0);
+    Com::printFLN(Com::tMotorMaxCurrentMA, 1.4142f * driver->rms_current(), 0);
     Com::printF(Com::tMotorMicrostepsColon, driver->microsteps());
     Com::printFLN(Com::tMotorSpaceMresColon, (int)driver->mres());
     Com::printFLN(Com::tMotorStealthChopColon, driver->en_pwm_mode(), BoolFormat::ONOFF);
@@ -174,7 +175,7 @@ void reportTMC2130(TMC2130Stepper* driver, ProgrammableStepperBase* b, int level
         } else {
             Com::printFLN(Com::tMax);
         }
-        Com::printFLN(Com::tMotorTPWMTHRS);
+        Com::printFLN(Com::tMotorTPWMTHRS, driver->TPWMTHRS());
         Com::printFLN(Com::tMotorTPOWERDOWN, (int)driver->TPOWERDOWN());
         Com::printF(Com::tMotorIRUN, driver->irun());
         Com::printFLN(Com::tMotorSlash31);
@@ -231,7 +232,7 @@ void TMCStepper2130Driver<stepCls, dirCls, enableCls, fclk>::init() {
         driver->TPWMTHRS(0); // Only stealthChop or spreadCycle
     }
 
-    if (stallguardSensitivity != -128) {
+    if (hasStallguard()) {
         stallguardSensitivity = constrain(stallguardSensitivity, -64, 63);
         driver->sgt(stallguardSensitivity);
     }
@@ -266,36 +267,38 @@ void TMCStepper2130Driver<stepCls, dirCls, enableCls, fclk>::timer500ms() {
     if (debug != -1) {
         reportTMC2130(driver, this, debug);
     }
-    // Access of bits results in reading register again, so we buffer result
-    TMC2130_n::DRV_STATUS_t status { driver->DRV_STATUS() };
-    if (status.sr == 0xFFFFFFFF || status.sr == 0x0) { // not in working state
-        return;
-    }
-    if (status.ot) { // over temperature
-        printMotorNumberAndName(false);
-        Com::printFLN(Com::tMotorDriverOvertempCurrent, currentMillis);
-    }
-    if (status.otpw) { // over temperature prewarn
-        if (otpwCount < 255) {
-            otpwCount++;
+    if (isEnabled) { // test only when enabled to prevent false messages. Disabled motors should not overheat anyway
+        // Access of bits results in reading register again, so we buffer result
+        TMC2130_n::DRV_STATUS_t status { driver->DRV_STATUS() };
+        if (status.sr == 0xFFFFFFFF || status.sr == 0x0) { // not in working state
+            return;
         }
-        if (otpwCount == 1) {
+        if (status.ot) { // over temperature
             printMotorNumberAndName(false);
-            Com::printFLN(Com::tMotorDriverOvertempWarningCurrent, currentMillis);
+            Com::printFLN(Com::tMotorDriverOvertempCurrent, currentMillis);
         }
-#if TMC_CURRENT_STEP_DOWN > 0
-        if (otpwCount > 4 && driver->isEnabled()) {
-            if (currentMillis > 100) {
-                currentMillis -= TMC_CURRENT_STEP_DOWN;
-                driver->rms_current(currentMillis);
-                printMotorNumberAndName(false);
-                Com::printFLN(Com::tMotorCurrentDecreasedTo, currentMillis);
+        if (status.otpw) { // over temperature prewarn
+            if (otpwCount < 255) {
+                otpwCount++;
             }
-        }
+            if (otpwCount == 1) {
+                printMotorNumberAndName(false);
+                Com::printFLN(Com::tMotorDriverOvertempWarningCurrent, currentMillis);
+            }
+#if TMC_CURRENT_STEP_DOWN > 0
+            if (otpwCount > 4 && driver->isEnabled()) {
+                if (currentMillis > 100) {
+                    currentMillis -= TMC_CURRENT_STEP_DOWN;
+                    driver->rms_current(currentMillis);
+                    printMotorNumberAndName(false);
+                    Com::printFLN(Com::tMotorCurrentDecreasedTo, currentMillis);
+                }
+            }
 #endif
-        otpw = true;
-    } else {
-        otpwCount = 0;
+            otpw = true;
+        } else {
+            otpwCount = 0;
+        }
     }
 }
 
@@ -359,6 +362,16 @@ void TMCStepper2130Driver<stepCls, dirCls, enableCls, fclk>::handleMCode(GCode& 
         printMotorNumberAndName(false);
         Com::printFLN(Com::tMotorSpaceStealthChopColon, stealthChop, BoolFormat::ONOFF);
         break;
+    case 906: // Report Motor current
+        if (com.hasS()) {
+            currentMillis = com.S;
+            driver->rms_current(com.S);
+            reportTMC2130(driver, this, 0);
+            init();
+        }
+        printMotorNumberAndName(false);
+        Com::printFLN(Com::tMotorSpaceRMSCurrentMAColon, currentMillis);
+        break;
     case 911: // Report TMC prewarn
         printMotorNumberAndName(false);
         Com::printFLN(Com::tMotorTempPrewarnTriggered, otpw, BoolFormat::TRUEFALSE);
@@ -381,11 +394,9 @@ void TMCStepper2130Driver<stepCls, dirCls, enableCls, fclk>::handleMCode(GCode& 
         if (hasStallguard()) {
             if (com.hasS()) {
                 if (com.S >= -64 && com.S <= 63) {
-                    stallguardSensitivity = static_cast<int8_t>(com.S);
-                } else {
-                    stallguardSensitivity = -128;
+                    stallguardSensitivity = static_cast<int16_t>(com.S);
+                    init();
                 }
-                init();
             }
             printMotorNumberAndName(false);
             Com::printFLN(Com::tMotorSpaceStallguardSensitivityColon, stallguardSensitivity);
@@ -404,15 +415,15 @@ void reportTMC5160(TMC5160Stepper* driver, ProgrammableStepperBase* b, int level
         break;
     case 1:
         Com::printFLN(Com::tMotorNoConnection);
-        break;
+        return;
     case 2:
         Com::printFLN(Com::tMotorNoPower);
         break;
     }
     Com::printFLN(Com::tMotorEnabledColon, driver->isEnabled(), BoolFormat::YESNO);
-    Com::printF(Com::tMotorRMSCurrentMA, driver->rms_current());
+    Com::printF(Com::tMotorRMSCurrentMAColon, driver->rms_current());
     Com::printFLN(Com::tMotorSpaceSetColonSpace, b->getCurrentMillis());
-    Com::printFLN(Com::tMotorMaxCurrentMA, 1.4142 * driver->rms_current(), 0);
+    Com::printFLN(Com::tMotorMaxCurrentMA, 1.4142f * driver->rms_current(), 0);
     Com::printF(Com::tMotorMicrostepsColon, driver->microsteps());
     Com::printFLN(Com::tMotorSpaceMresColon, (int)driver->mres());
     Com::printFLN(Com::tMotorStealthChopColon, driver->en_pwm_mode(), BoolFormat::ONOFF);
@@ -490,7 +501,7 @@ void TMCStepper5160Driver<stepCls, dirCls, enableCls, fclk>::init() {
         driver->TPWMTHRS(0); // Only stealthChop or spreadCycle
     }
 
-    if (stallguardSensitivity != -128) {
+    if (hasStallguard()) {
         stallguardSensitivity = constrain(stallguardSensitivity, -64, 63);
         driver->sgt(stallguardSensitivity);
     }
@@ -525,36 +536,38 @@ void TMCStepper5160Driver<stepCls, dirCls, enableCls, fclk>::timer500ms() {
     if (debug != -1) {
         reportTMC5160(driver, this, debug);
     }
-    // Access of bits results in reading register again, so we buffer result
-    TMC2130_n::DRV_STATUS_t status { driver->DRV_STATUS() };
-    if (status.sr == 0xFFFFFFFF || status.sr == 0x0) { // not in working state
-        return;
-    }
-    if (status.ot) { // over temperature
-        printMotorNumberAndName(false);
-        Com::printFLN(Com::tMotorDriverOvertempCurrent, currentMillis);
-    }
-    if (status.otpw) { // over temperature prewarn
-        if (otpwCount < 255) {
-            otpwCount++;
+    if (isEnabled) { // test only when enabled to prevent false messages. Disabled motors should not overheat anyway
+        // Access of bits results in reading register again, so we buffer result
+        TMC2130_n::DRV_STATUS_t status { driver->DRV_STATUS() };
+        if (status.sr == 0xFFFFFFFF || status.sr == 0x0) { // not in working state
+            return;
         }
-        if (otpwCount == 1) {
+        if (status.ot) { // over temperature
             printMotorNumberAndName(false);
-            Com::printFLN(Com::tMotorDriverOvertempWarningCurrent, currentMillis);
+            Com::printFLN(Com::tMotorDriverOvertempCurrent, currentMillis);
         }
-#if TMC_CURRENT_STEP_DOWN > 0
-        if (otpwCount > 4 && driver->isEnabled()) {
-            if (currentMillis > 100) {
-                currentMillis -= TMC_CURRENT_STEP_DOWN;
-                driver->rms_current(currentMillis);
-                printMotorNumberAndName(false);
-                Com::printFLN(Com::tMotorCurrentDecreasedTo, currentMillis);
+        if (status.otpw) { // over temperature prewarn
+            if (otpwCount < 255) {
+                otpwCount++;
             }
-        }
+            if (otpwCount == 1) {
+                printMotorNumberAndName(false);
+                Com::printFLN(Com::tMotorDriverOvertempWarningCurrent, currentMillis);
+            }
+#if TMC_CURRENT_STEP_DOWN > 0
+            if (otpwCount > 4 && driver->isEnabled()) {
+                if (currentMillis > 100) {
+                    currentMillis -= TMC_CURRENT_STEP_DOWN;
+                    driver->rms_current(currentMillis);
+                    printMotorNumberAndName(false);
+                    Com::printFLN(Com::tMotorCurrentDecreasedTo, currentMillis);
+                }
+            }
 #endif
-        otpw = true;
-    } else {
-        otpwCount = 0;
+            otpw = true;
+        } else {
+            otpwCount = 0;
+        }
     }
 }
 
@@ -597,8 +610,7 @@ void TMCStepper5160Driver<stepCls, dirCls, enableCls, fclk>::afterHoming() {
 template <class stepCls, class dirCls, class enableCls, uint32_t fclk>
 void TMCStepper5160Driver<stepCls, dirCls, enableCls, fclk>::handleMCode(GCode& com) {
     switch (com.M) {
-    case 122: // print debug informations
-    {
+    case 122: { // print debug informations
         Com::println();
         printMotorNumberAndName();
         reportTMC5160(driver, this, com.hasD() ? static_cast<int>(com.D) : 0);
@@ -617,6 +629,16 @@ void TMCStepper5160Driver<stepCls, dirCls, enableCls, fclk>::handleMCode(GCode& 
         }
         printMotorNumberAndName(false);
         Com::printFLN(Com::tMotorSpaceStealthChopColon, stealthChop, BoolFormat::ONOFF);
+        break;
+    case 906: // Report Motor current
+        if (com.hasS()) {
+            currentMillis = com.S;
+            driver->rms_current(com.S);
+            reportTMC5160(driver, this, 0);
+            init();
+        }
+        printMotorNumberAndName(false);
+        Com::printFLN(Com::tMotorSpaceRMSCurrentMAColon, currentMillis);
         break;
     case 911: // Report TMC prewarn
         printMotorNumberAndName(false);
@@ -640,11 +662,9 @@ void TMCStepper5160Driver<stepCls, dirCls, enableCls, fclk>::handleMCode(GCode& 
         if (hasStallguard()) {
             if (com.hasS()) {
                 if (com.S >= -64 && com.S <= 63) {
-                    stallguardSensitivity = static_cast<int8_t>(com.S);
-                } else {
-                    stallguardSensitivity = -128;
+                    stallguardSensitivity = static_cast<int16_t>(com.S);
+                    init();
                 }
-                init();
             }
             printMotorNumberAndName(false);
             Com::printFLN(Com::tMotorSpaceStallguardSensitivityColon, stallguardSensitivity);
@@ -664,15 +684,15 @@ void reportTMC2208(TMC2208Stepper* driver, ProgrammableStepperBase* b, int level
         break;
     case 1:
         Com::printFLN(Com::tMotorNoConnection);
-        break;
+        return;
     case 2:
         Com::printFLN(Com::tMotorNoPower);
         break;
     }
     Com::printFLN(Com::tMotorEnabledColon, driver->isEnabled(), BoolFormat::YESNO);
-    Com::printF(Com::tMotorRMSCurrentMA, driver->rms_current());
+    Com::printF(Com::tMotorRMSCurrentMAColon, driver->rms_current());
     Com::printFLN(Com::tMotorSpaceSetColonSpace, b->getCurrentMillis());
-    Com::printFLN(Com::tMotorMaxCurrentMA, 1.4142 * driver->rms_current(), 0);
+    Com::printFLN(Com::tMotorMaxCurrentMA, 1.4142f * driver->rms_current(), 0);
     Com::printF(Com::tMotorMicrostepsColon, driver->microsteps());
     Com::printFLN(Com::tMotorSpaceMresColon, (int)driver->mres());
     Com::printFLN(Com::tMotorStealthChopColon, b->getStealthChop(), BoolFormat::ONOFF);
@@ -714,14 +734,14 @@ void TMCStepper2208Driver<stepCls, dirCls, enableCls, fclk>::init() {
     disable();
     driver->begin();
 
-    TMC2208_n::GCONF_t gconf { 0 };
+    TMC2208_n::GCONF_t gconf = { 0 };
     gconf.pdn_disable = true;      // Use UART
     gconf.mstep_reg_select = true; // Select microsteps with UART
     gconf.i_scale_analog = false;
     gconf.en_spreadcycle = !stealthChop;
     driver->GCONF(gconf.sr);
 
-    TMC2208_n::CHOPCONF_t chopconf { 0 };
+    TMC2208_n::CHOPCONF_t chopconf = { 0 };
     chopconf.tbl = 1;
     chopconf.toff = tmcChopperTiming.toff;
     chopconf.intpol = TMC_INTERPOLATE;
@@ -776,7 +796,6 @@ void TMCStepper2208Driver<stepCls, dirCls, enableCls, fclk>::reset(uint16_t _mic
     currentMillis = _currentMillis;
     stealthChop = _stealthChop;
     hybridSpeed = _hybridThrs;
-    stallguardSensitivity = 8;
     init();
 }
 
@@ -786,36 +805,38 @@ void TMCStepper2208Driver<stepCls, dirCls, enableCls, fclk>::timer500ms() {
     if (debug != -1) {
         reportTMC2208(driver, this, debug);
     }
-    // Access of bits results in reading register again, so we buffer result
-    TMC2208_n::DRV_STATUS_t status { driver->DRV_STATUS() };
-    if (status.sr == 0xFFFFFFFF || status.sr == 0x0) { // not in working state
-        return;
-    }
-    if (status.ot) { // over temperature
-        printMotorNumberAndName(false);
-        Com::printFLN(Com::tMotorDriverOvertempCurrent, currentMillis);
-    }
-    if (status.otpw) { // over temperature prewarn
-        if (otpwCount < 255) {
-            otpwCount++;
+    if (isEnabled) { // test only when enabled to prevent false messages. Disabled motors should not overheat anyway
+        // Access of bits results in reading register again, so we buffer result
+        TMC2208_n::DRV_STATUS_t status { driver->DRV_STATUS() };
+        if (status.sr == 0xFFFFFFFF || status.sr == 0x0) { // not in working state
+            return;
         }
-        if (otpwCount == 1) {
+        if (status.ot) { // over temperature
             printMotorNumberAndName(false);
-            Com::printFLN(Com::tMotorDriverOvertempWarningCurrent, currentMillis);
+            Com::printFLN(Com::tMotorDriverOvertempCurrent, currentMillis);
         }
-#if TMC_CURRENT_STEP_DOWN > 0
-        if (otpwCount > 4 && driver->isEnabled()) {
-            if (currentMillis > 100) {
-                currentMillis -= TMC_CURRENT_STEP_DOWN;
-                driver->rms_current(currentMillis);
-                printMotorNumberAndName(false);
-                Com::printFLN(Com::tMotorCurrentDecreasedTo, currentMillis);
+        if (status.otpw) { // over temperature prewarn
+            if (otpwCount < 255) {
+                otpwCount++;
             }
-        }
+            if (otpwCount == 1) {
+                printMotorNumberAndName(false);
+                Com::printFLN(Com::tMotorDriverOvertempWarningCurrent, currentMillis);
+            }
+#if TMC_CURRENT_STEP_DOWN > 0
+            if (otpwCount > 4 && driver->isEnabled()) {
+                if (currentMillis > 100) {
+                    currentMillis -= TMC_CURRENT_STEP_DOWN;
+                    driver->rms_current(currentMillis);
+                    printMotorNumberAndName(false);
+                    Com::printFLN(Com::tMotorCurrentDecreasedTo, currentMillis);
+                }
+            }
 #endif
-        otpw = true;
-    } else {
-        otpwCount = 0;
+            otpw = true;
+        } else {
+            otpwCount = 0;
+        }
     }
 #endif
 }
@@ -849,8 +870,7 @@ void TMCStepper2208Driver<stepCls, dirCls, enableCls, fclk>::afterHoming() {
 template <class stepCls, class dirCls, class enableCls, uint32_t fclk>
 void TMCStepper2208Driver<stepCls, dirCls, enableCls, fclk>::handleMCode(GCode& com) {
     switch (com.M) {
-    case 122: // print debug informations
-    {
+    case 122: { // print debug informations
         Com::println();
         printMotorNumberAndName();
         reportTMC2208(driver, this, com.hasD() ? static_cast<int>(com.D) : 0);
@@ -874,6 +894,16 @@ void TMCStepper2208Driver<stepCls, dirCls, enableCls, fclk>::handleMCode(GCode& 
         }
         printMotorNumberAndName(false);
         Com::printFLN(Com::tMotorSpaceStealthChopColon, stealthChop, BoolFormat::ONOFF);
+        break;
+    case 906: // Report Motor current
+        if (com.hasS()) {
+            currentMillis = com.S;
+            driver->rms_current(com.S);
+            reportTMC2208(driver, this, 0);
+            init();
+        }
+        printMotorNumberAndName(false);
+        Com::printFLN(Com::tMotorSpaceRMSCurrentMAColon, currentMillis);
         break;
     case 911: // Report TMC prewarn
         printMotorNumberAndName(false);
@@ -910,15 +940,15 @@ void reportTMC2209(TMC2209Stepper* driver, ProgrammableStepperBase* b, int level
         break;
     case 1:
         Com::printFLN(Com::tMotorNoConnection);
-        break;
+        return;
     case 2:
         Com::printFLN(Com::tMotorNoPower);
         break;
     }
     Com::printFLN(Com::tMotorEnabledColon, driver->isEnabled(), BoolFormat::YESNO);
-    Com::printF(Com::tMotorRMSCurrentMA, driver->rms_current());
+    Com::printF(Com::tMotorRMSCurrentMAColon, driver->rms_current());
     Com::printFLN(Com::tMotorSpaceSetColonSpace, b->getCurrentMillis());
-    Com::printFLN(Com::tMotorMaxCurrentMA, 1.4142 * driver->rms_current(), 0);
+    Com::printFLN(Com::tMotorMaxCurrentMA, 1.4142f * driver->rms_current(), 0);
     Com::printF(Com::tMotorMicrostepsColon, driver->microsteps());
     Com::printFLN(Com::tMotorSpaceMresColon, (int)driver->mres());
     Com::printFLN(Com::tMotorStealthChopColon, b->getStealthChop(), BoolFormat::ONOFF);
@@ -967,20 +997,19 @@ void reportTMC2209(TMC2209Stepper* driver, ProgrammableStepperBase* b, int level
 template <class stepCls, class dirCls, class enableCls, uint32_t fclk>
 void TMCStepper2209Driver<stepCls, dirCls, enableCls, fclk>::init() {
     disable();
-    driver->begin();
 
     // The TMC2209_n namespace doesn't recreate all the register structs for the 2209 specifically
     // We're meant to use the 2208's.
     // However, it does have it's own IOIN_t, COOLCONF_t, SG_RESULT_t, and SGTHRS_t tables!
 
-    TMC2208_n::GCONF_t gconf { 0 };
+    TMC2208_n::GCONF_t gconf = { 0 };
     gconf.pdn_disable = true;      // Use UART
     gconf.mstep_reg_select = true; // Select microsteps with UART
     gconf.i_scale_analog = false;
     gconf.en_spreadcycle = !stealthChop;
     driver->GCONF(gconf.sr);
 
-    TMC2208_n::CHOPCONF_t chopconf { 0 };
+    TMC2208_n::CHOPCONF_t chopconf = { 0 };
     chopconf.tbl = 1;
     chopconf.toff = tmcChopperTiming.toff;
     chopconf.intpol = TMC_INTERPOLATE;
@@ -996,7 +1025,7 @@ void TMCStepper2209Driver<stepCls, dirCls, enableCls, fclk>::init() {
     driver->iholddelay(10);
     driver->TPOWERDOWN(128); // ~2s until driver lowers to hold current
 
-    TMC2208_n::PWMCONF_t pwmconf { 0 };
+    TMC2208_n::PWMCONF_t pwmconf = { 0 };
     pwmconf.pwm_lim = 12;
     pwmconf.pwm_reg = 8;
     pwmconf.pwm_autograd = true;
@@ -1006,15 +1035,13 @@ void TMCStepper2209Driver<stepCls, dirCls, enableCls, fclk>::init() {
     pwmconf.pwm_ofs = 36;
     driver->PWMCONF(pwmconf.sr);
 
-    //TMC2209_n::COOLCONF_t coolconf { 0 };
-
     if (hybridSpeed >= 0) {
         driver->TPWMTHRS(fclk * microsteps / static_cast<uint32_t>(256 * hybridSpeed * Motion1::resolution[getAxis()])); // need computed
     } else {
         driver->TPWMTHRS(0); // Only stealthChop or spreadCycle
     }
 
-    if (stallguardSensitivity != -128) {
+    if (hasStallguard()) {
         stallguardSensitivity = constrain(stallguardSensitivity, 0, 255);
         driver->SGTHRS(stallguardSensitivity);
     }
@@ -1050,36 +1077,47 @@ void TMCStepper2209Driver<stepCls, dirCls, enableCls, fclk>::timer500ms() {
     if (debug != -1) {
         reportTMC2209(driver, this, debug);
     }
-    // Access of bits results in reading register again, so we buffer result
-    TMC2208_n::DRV_STATUS_t status { driver->DRV_STATUS() };
-    if (status.sr == 0xFFFFFFFF || status.sr == 0x0) { // not in working state
-        return;
-    }
-    if (status.ot) { // over temperature
-        printMotorNumberAndName(false);
-        Com::printFLN(Com::tMotorDriverOvertempCurrent, currentMillis);
-    }
-    if (status.otpw) { // over temperature prewarn
-        if (otpwCount < 255) {
-            otpwCount++;
+    if (isEnabled) { // test only when enabled to prevent false messages. Disabled motors should not overheat anyway
+        // Access of bits results in reading register again, so we buffer result
+        TMC2208_n::DRV_STATUS_t status { driver->DRV_STATUS() };
+        if (status.sr == 0xFFFFFFFF || status.sr == 0x0) { // not in working state
+            return;
         }
-        if (otpwCount == 1) {
+        if (status.ot) { // over temperature
             printMotorNumberAndName(false);
-            Com::printFLN(Com::tMotorDriverOvertempWarningCurrent, currentMillis);
+            Com::printFLN(Com::tMotorDriverOvertempCurrent, currentMillis);
         }
-#if TMC_CURRENT_STEP_DOWN > 0
-        if (otpwCount > 4 && driver->isEnabled()) {
-            if (currentMillis > 100) {
-                currentMillis -= TMC_CURRENT_STEP_DOWN;
-                driver->rms_current(currentMillis);
+        if (status.otpw) { // over temperature prewarn
+            if (otpwCount < 255) {
+                otpwCount++;
+            }
+            if (otpwCount == 1) {
                 printMotorNumberAndName(false);
-                Com::printFLN(Com::tMotorCurrentDecreasedTo, currentMillis);
+                Com::printFLN(Com::tMotorDriverOvertempWarningCurrent, currentMillis);
+            }
+#if TMC_CURRENT_STEP_DOWN > 0
+            if (otpwCount > 4 && driver->isEnabled()) {
+                if (currentMillis > 100) {
+                    currentMillis -= TMC_CURRENT_STEP_DOWN;
+                    driver->rms_current(currentMillis);
+                    printMotorNumberAndName(false);
+                    Com::printFLN(Com::tMotorCurrentDecreasedTo, currentMillis);
+                }
+            }
+#endif
+            otpw = true;
+        } else {
+            otpwCount = 0;
+        }
+        if (status.s2ga || status.s2gb || status.s2vsa || status.s2vsb) {
+            printMotorNumberAndName(false);
+            Com::printF(Com::tMotorDriverShort, (status.s2ga || status.s2gb) ? PSTR("to ground!") : PSTR("to low-side MOSFET!"));
+            if (status.s2ga || status.s2vsa) {
+                Com::printFLN(PSTR(" (Phase A)"));
+            } else {
+                Com::printFLN(PSTR(" (Phase B)"));
             }
         }
-#endif
-        otpw = true;
-    } else {
-        otpwCount = 0;
     }
 #endif
 }
@@ -1113,8 +1151,7 @@ void TMCStepper2209Driver<stepCls, dirCls, enableCls, fclk>::afterHoming() {
 template <class stepCls, class dirCls, class enableCls, uint32_t fclk>
 void TMCStepper2209Driver<stepCls, dirCls, enableCls, fclk>::handleMCode(GCode& com) {
     switch (com.M) {
-    case 122: // print debug informations
-    {
+    case 122: { // print debug informations
         Com::println();
         printMotorNumberAndName();
         reportTMC2209(driver, this, com.hasD() ? static_cast<int>(com.D) : 0);
@@ -1138,6 +1175,16 @@ void TMCStepper2209Driver<stepCls, dirCls, enableCls, fclk>::handleMCode(GCode& 
         }
         printMotorNumberAndName(false);
         Com::printFLN(Com::tMotorSpaceStealthChopColon, stealthChop, BoolFormat::ONOFF);
+        break;
+    case 906: // Report Motor current
+        if (com.hasS()) {
+            currentMillis = com.S;
+            driver->rms_current(com.S);
+            reportTMC2209(driver, this, 0);
+            init();
+        }
+        printMotorNumberAndName(false);
+        Com::printFLN(Com::tMotorSpaceRMSCurrentMAColon, currentMillis);
         break;
     case 911: // Report TMC prewarn
         printMotorNumberAndName(false);
@@ -1163,10 +1210,8 @@ void TMCStepper2209Driver<stepCls, dirCls, enableCls, fclk>::handleMCode(GCode& 
             if (com.hasS()) {
                 if (com.S >= 0 && com.S <= 255) {
                     stallguardSensitivity = static_cast<int16_t>(com.S);
-                } else {
-                    stallguardSensitivity = -128;
+                    init();
                 }
-                init();
             }
             printMotorNumberAndName(false);
             Com::printFLN(Com::tMotorSpaceStallguardSensitivityColon, stallguardSensitivity);
@@ -1315,5 +1360,5 @@ void MixingStepperDriver::eepromHandle() {
 }
 
 #undef IO_TARGET
-#define IO_TARGET IO_TARGET_TOOLS_TEMPLATES
+#define IO_TARGET IO_TARGET_TEMPLATES
 #include "../io/redefine.h"

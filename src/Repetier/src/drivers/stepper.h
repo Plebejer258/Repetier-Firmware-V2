@@ -1,11 +1,16 @@
 #include <TMCStepper.h>
 
+#ifndef TMC_SW_SERIAL_BAUD
+#define TMC_SW_SERIAL_BAUD 19200
+#endif
+
 class EndstopDriver;
 class GCode;
 enum class GUIAction;
 
 class StepperDriverBase {
 protected:
+    StepperDriverBase* parent;
     EndstopDriver* minEndstop;
     EndstopDriver* maxEndstop;
     bool direction;
@@ -14,12 +19,14 @@ protected:
 
 public:
     StepperDriverBase(EndstopDriver* minES, EndstopDriver* maxES)
-        : minEndstop(minES)
+        : parent(nullptr)
+        , minEndstop(minES)
         , maxEndstop(maxES)
         , direction(true)
         , axisBit(8)
         , axis(E_AXIS) { }
     virtual ~StepperDriverBase() { }
+    inline void setParent(StepperDriverBase* ptr) { parent = ptr; }
     inline EndstopDriver* getMinEndstop() { return minEndstop; }
     inline EndstopDriver* getMaxEndstop() { return maxEndstop; }
     inline bool updateEndstop() {
@@ -135,7 +142,10 @@ public:
     uint32_t position;
     ObservableStepperDriver(driver* _stepper)
         : StepperDriverBase(_stepper->getMinEndstop(), _stepper->getMaxEndstop())
-        , stepper(_stepper) { position = 0; }
+        , stepper(_stepper) {
+        stepper->setParent(this);
+        position = 0;
+    }
     virtual ~ObservableStepperDriver() { }
     inline EndstopDriver* getMinEndstop() { return minEndstop; }
     inline EndstopDriver* getMaxEndstop() { return maxEndstop; }
@@ -180,6 +190,9 @@ public:
     // Configuration in GUI
     virtual void menuConfig(GUIAction action, void* data) {
         stepper->menuConfig(action, data);
+    }
+    virtual void eepromHandle() final {
+        stepper->eepromHandle();
     }
 };
 
@@ -310,10 +323,10 @@ public:
         , otpw(false)
         , otpwCount(0)
         , stallguardSensitivity(_stallguardSensitivity) { }
-    int16_t getMicrosteps() { return microsteps; }
-    int16_t getCurrentMillis() { return currentMillis; }
-    bool getStealthChop() { return stealthChop; }
-    float getHybridSpeed() { return hybridSpeed; }
+    inline int16_t getMicrosteps() { return microsteps; }
+    inline int16_t getCurrentMillis() { return currentMillis; }
+    inline bool getStealthChop() { return stealthChop; }
+    inline float getHybridSpeed() { return hybridSpeed; }
     inline bool hasStallguard() { return stallguardSensitivity != -128; }
     void reserveEEPROM(uint16_t extraBytes);
     void processEEPROM(uint8_t flags);
@@ -324,13 +337,17 @@ template <class stepCls, class dirCls, class enableCls, uint32_t fclk>
 class TMCStepper2130Driver : public StepperDriverBase, public ProgrammableStepperBase {
     TMC2130Stepper* driver;
 
+protected:
+    bool isEnabled;
+
 public:
     TMCStepper2130Driver(EndstopDriver* minES, EndstopDriver* maxES,
                          TMC2130Stepper* _driver, uint16_t _microsteps, uint16_t _current_millis, bool _stealthChop, float _hybridThrs, int8_t _stallSensitivity)
         : StepperDriverBase(minES, maxES)
         , ProgrammableStepperBase(_microsteps, _current_millis, _stealthChop, _hybridThrs, _stallSensitivity)
-        , driver(_driver) { }
-    virtual void init();
+        , driver(_driver)
+        , isEnabled(false) { }
+    virtual void init() final;
     void reset(uint16_t _microsteps, uint16_t _current_millis, bool _stealthChop, float _hybridThrs, int8_t _stallSensitivity);
     inline void step() final {
         stepCls::on();
@@ -344,9 +361,11 @@ public:
     }
     inline void enable() final {
         enableCls::on();
+        isEnabled = true;
     }
     inline void disable() final {
         enableCls::off();
+        isEnabled = false;
     }
     void eepromHandle();
     void eepromReserve();
@@ -370,13 +389,17 @@ template <class stepCls, class dirCls, class enableCls, uint32_t fclk>
 class TMCStepper5160Driver : public StepperDriverBase, public ProgrammableStepperBase {
     TMC5160Stepper* driver;
 
+protected:
+    bool isEnabled;
+
 public:
     TMCStepper5160Driver(EndstopDriver* minES, EndstopDriver* maxES,
                          TMC5160Stepper* _driver, uint16_t _microsteps, uint16_t _current_millis, bool _stealthChop, float _hybridThrs, int8_t _stallSensitivity)
         : StepperDriverBase(minES, maxES)
         , ProgrammableStepperBase(_microsteps, _current_millis, _stealthChop, _hybridThrs, _stallSensitivity)
-        , driver(_driver) { }
-    virtual void init();
+        , driver(_driver)
+        , isEnabled(false) { }
+    virtual void init() final;
     void reset(uint16_t _microsteps, uint16_t _current_millis, bool _stealthChop, float _hybridThrs, int8_t _stallSensitivity);
     inline void step() final {
         stepCls::on();
@@ -390,9 +413,11 @@ public:
     }
     inline void enable() final {
         enableCls::on();
+        isEnabled = true;
     }
     inline void disable() final {
         enableCls::off();
+        isEnabled = false;
     }
     virtual void eepromHandle() final;
     void eepromReserve();
@@ -417,13 +442,17 @@ template <class stepCls, class dirCls, class enableCls, uint32_t fclk>
 class TMCStepper2208Driver : public StepperDriverBase, public ProgrammableStepperBase {
     TMC2208Stepper* driver;
 
+protected:
+    bool isEnabled;
+
 public:
     TMCStepper2208Driver(EndstopDriver* minES, EndstopDriver* maxES,
                          TMC2208Stepper* _driver, uint16_t _microsteps, uint16_t _current_millis, bool _stealthChop, float _hybridThrs)
         : StepperDriverBase(minES, maxES)
         , ProgrammableStepperBase(_microsteps, _current_millis, _stealthChop, _hybridThrs, -128)
-        , driver(_driver) { }
-    virtual void init();
+        , driver(_driver)
+        , isEnabled(false) { }
+    virtual void init() final;
     void reset(uint16_t _microsteps, uint16_t _current_millis, bool _stealthChop, float _hybridThrs);
     inline void step() final {
         stepCls::on();
@@ -437,9 +466,11 @@ public:
     }
     inline void enable() final {
         enableCls::on();
+        isEnabled = true;
     }
     inline void disable() final {
         enableCls::off();
+        isEnabled = false;
     }
     virtual void eepromHandle() final;
     void eepromReserve();
@@ -463,14 +494,27 @@ public:
 template <class stepCls, class dirCls, class enableCls, uint32_t fclk>
 class TMCStepper2209Driver : public StepperDriverBase, public ProgrammableStepperBase {
     TMC2209Stepper* driver;
+    bool usesSoftwareSerial;
+
+protected:
+    bool isEnabled;
 
 public:
     TMCStepper2209Driver(EndstopDriver* minES, EndstopDriver* maxES,
-                         TMC2209Stepper* _driver, uint16_t _microsteps, uint16_t _current_millis, bool _stealthChop, float _hybridThrs, int16_t _stallSensitivity)
+                         TMC2209Stepper* _driver, uint16_t _microsteps, uint16_t _current_millis, bool _stealthChop, float _hybridThrs, int16_t _stallSensitivity, bool _isSoftware)
         : StepperDriverBase(minES, maxES)
         , ProgrammableStepperBase(_microsteps, _current_millis, _stealthChop, _hybridThrs, _stallSensitivity)
-        , driver(_driver) { }
-    virtual void init();
+        , driver(_driver)
+        , usesSoftwareSerial(_isSoftware)
+        , isEnabled(false) {
+#if SW_CAPABLE_PLATFORM
+        if (usesSoftwareSerial && driver != nullptr) {
+            // Need to do this before ANY sort of serial commands or we'll get a infinite loop in the serial library
+            driver->beginSerial(TMC_SW_SERIAL_BAUD); // starts just the serial.
+        }
+#endif
+    }
+    virtual void init() final;
     void reset(uint16_t _microsteps, uint16_t _current_millis, bool _stealthChop, float _hybridThrs, int16_t _stallSensitivity);
     inline void step() final {
         stepCls::on();
@@ -484,9 +528,11 @@ public:
     }
     inline void enable() final {
         enableCls::on();
+        isEnabled = true;
     }
     inline void disable() final {
         enableCls::off();
+        isEnabled = false;
     }
     virtual void eepromHandle() final;
     void eepromReserve();

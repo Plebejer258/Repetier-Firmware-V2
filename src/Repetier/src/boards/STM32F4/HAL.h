@@ -37,7 +37,9 @@
 #include "pins.h"
 #include "Print.h"
 #include "fastio.h"
+#if FEATURE_WATCHDOG
 #include <IWatchdog.h>
+#endif
 
 // Which I2C port to use?
 #ifndef WIRE_PORT
@@ -89,6 +91,8 @@ typedef char prog_char;
 #ifndef MOTION2_TIMER_NUM
 #define MOTION2_TIMER_NUM 6
 #endif
+// Beware! On STM32F4's, TIM10's IRQHandler is shared with TIM1's!
+// Both timers will interrupt with the same function! 
 #ifndef PWM_TIMER_NUM
 #define PWM_TIMER_NUM 10
 #endif
@@ -106,8 +110,8 @@ typedef char prog_char;
 // for host autoconfiguration
 #define SERIAL_BUFFER_SIZE SERIAL_RX_BUFFER_SIZE
 
-#define PWM_CLOCK_FREQ 5000
-#define PWM_COUNTER_100MS 500
+#define PWM_CLOCK_FREQ 10000
+#define PWM_COUNTER_100MS 1000
 
 // #define MAX_ANALOG_INPUTS 16 // gets already set in pins_arduino.h
 
@@ -264,6 +268,7 @@ public:
     static char virtualEeprom[EEPROM_BYTES];
     static bool wdPinged;
     static uint8_t i2cError;
+    static BootReason startReason; 
 
     HAL();
     virtual ~HAL();
@@ -404,7 +409,7 @@ public:
         //__disable_irq();
     }
     static inline millis_t timeInMilliseconds() {
-        return millis();
+        return HAL_GetTick();
     }
     static inline char readFlashByte(PGM_P ptr) {
         return pgm_read_byte(ptr);
@@ -416,7 +421,15 @@ public:
     static inline void serialSetBaudrate(long baud) {
         // Serial.setInterruptPriority(1);
 #if defined(BLUETOOTH_SERIAL) && BLUETOOTH_SERIAL > 0
+        RFSERIAL2.end();
         RFSERIAL2.begin(baud);
+#endif
+#if defined(USBCON) && defined(USBD_USE_CDC) 
+        if (static_cast<Stream*>(&RFSERIAL) != &SerialUSB) {
+            RFSERIAL.end();
+        }
+#else
+        RFSERIAL.end();
 #endif
         RFSERIAL.begin(baud);
     }
@@ -427,6 +440,8 @@ public:
         RFSERIAL.flush();
     }
     static void setupTimer();
+    static void handlePeriodical();
+    static void updateStartReason();
     static void showStartReason();
     static int getFreeRam();
     static void resetHardware();
@@ -448,7 +463,9 @@ public:
 
     // Watchdog support
     inline static void startWatchdog() {
+#if FEATURE_WATCHDOG
         IWatchdog.begin(WATCHDOG_INTERVAL);
+#endif
     };
     inline static void stopWatchdog() { }
     inline static void pingWatchdog() {
@@ -460,6 +477,8 @@ public:
 #if NUM_SERVOS > 0
     static unsigned int servoTimings[4];
     static void servoMicroseconds(uint8_t servo, int ms, uint16_t autoOff);
+#else 
+    static void servoMicroseconds(uint8_t servo, int ms, uint16_t autoOff) { }
 #endif
 
     static void analogStart(void);

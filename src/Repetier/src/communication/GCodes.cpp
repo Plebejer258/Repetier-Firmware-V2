@@ -23,7 +23,7 @@
 
 #include "Repetier.h"
 
-void GCode_0_1(GCode* com) {
+void __attribute__((weak)) GCode_0_1(GCode* com) {
 #if defined(G0_FEEDRATE) && G0_FEEDRATE > 0
     float backupFeedrate = Printer::feedrate;
     if (com->G == 0 && G0_FEEDRATE > 0) {
@@ -32,9 +32,13 @@ void GCode_0_1(GCode* com) {
 #endif
     if (com->hasP()) {
         Printer::setNoDestinationCheck(com->P == 0);
+        if (com->hasNoXYZ()) {
+            Com::printFLN(PSTR("Destination checking "), com->P != 0, BoolFormat::ONOFF);
+        }
     }
     Tool::getActiveTool()->extractG1(com);
     Printer::setDestinationStepsFromGCode(com); // For X Y Z E F
+
 #if defined(G0_FEEDRATE) && G0_FEEDRATE > 0
     if (com->G == 0 && G0_FEEDRATE > 0) {
         // if (!(com->hasF() && com->F > 0.1)) {
@@ -65,7 +69,7 @@ void GCode_0_1(GCode* com) {
 #endif
 }
 
-void GCode_2_3(GCode* com) {
+void __attribute__((weak)) GCode_2_3(GCode* com) {
 #if ARC_SUPPORT
     float position[NUM_AXES];
     Motion1::copyCurrentOfficial(position);
@@ -149,7 +153,7 @@ void GCode_2_3(GCode* com) {
         HeatManager* heater = Tool::getActiveTool()->getHeater();
         if (Printer::relativeCoordinateMode || Printer::relativeExtruderCoordinateMode) {
             if (fabs(com->E) * Printer::extrusionFactor > EXTRUDE_MAXLENGTH) {
-                Com::printWarningF(PSTR("MAx. extrusion distance per move exceeded - ignoring move."));
+                Com::printWarningF(PSTR("Max. extrusion distance per move exceeded - ignoring move."));
                 p = 0;
             }
             target[E_AXIS] = Motion1::currentPosition[E_AXIS] + p;
@@ -279,14 +283,16 @@ void GCode_2_3(GCode* com) {
 #endif
 }
 
-void GCode_4(GCode* com) {
+void __attribute__((weak)) GCode_4(GCode* com) {
     int32_t codenum;
     Motion1::waitForEndOfMoves();
     codenum = 0;
-    if (com->hasP())
-        codenum = com->P; // milliseconds to wait
-    if (com->hasS())
+    if (com->hasS()) {
         codenum = com->S * 1000; // seconds to wait
+    }
+    if (com->hasP()) {
+        codenum += com->P; // milliseconds to wait
+    }
 
     codenum += HAL::timeInMilliseconds(); // keep track of when we started waiting
     while ((uint32_t)(codenum - HAL::timeInMilliseconds()) < 2000000000) {
@@ -295,7 +301,7 @@ void GCode_4(GCode* com) {
     }
 }
 
-void GCode_10(GCode* com) {
+void __attribute__((weak)) GCode_10(GCode* com) {
 #if FEATURE_RETRACTION && NUM_TOOLS > 0
 #if NUM_TOOLS > 1
     Tool::getActiveTool()->retract(true, com->hasS() && com->S > 0);
@@ -315,15 +321,15 @@ void GCode_11(GCode* com) {
 #endif
 }
 
-void GCode_20(GCode* com) {
+void __attribute__((weak)) GCode_20(GCode* com) {
     Printer::unitIsInches = 1;
 }
 
-void GCode_21(GCode* com) {
+void __attribute__((weak)) GCode_21(GCode* com) {
     Printer::unitIsInches = 0;
 }
 
-void GCode_28(GCode* com) {
+void __attribute__((weak)) GCode_28(GCode* com) {
     fast8_t homeAxis = 0;
     homeAxis |= com->hasX() ? 1 : 0;
     homeAxis |= com->hasY() ? 2 : 0;
@@ -335,7 +341,7 @@ void GCode_28(GCode* com) {
     Motion1::homeAxes(homeAxis);
 }
 
-void GCode_29(GCode* com) {
+void __attribute__((weak)) GCode_29(GCode* com) {
     /*
 #if FEATURE_Z_PROBE
     // Printer::prepareForProbing();
@@ -435,7 +441,7 @@ void GCode_29(GCode* com) {
 */
 }
 
-void GCode_30(GCode* com) {
+void __attribute__((weak)) GCode_30(GCode* com) {
 #if Z_PROBE_TYPE
     // G30 [Pn] [S]
     // G30 (the same as G30 P3) single probe set Z0
@@ -443,7 +449,9 @@ void GCode_30(GCode* com) {
     // G30 H<height> R<offset> Make probe define new Z and z offset (R) at trigger point assuming z-probe measured an object of H height.
     uint8_t p = (com->hasP() ? (uint8_t)com->P : 3);
     if (p & 1) {
-        ZProbeHandler::activate();
+        if (!ZProbeHandler::activate()) {
+            return;
+        }
     }
     if (com->hasS()) {
         float curHeight = (com->hasZ() ? com->Z : Motion1::currentPosition[Z_AXIS]);
@@ -463,6 +471,7 @@ void GCode_30(GCode* com) {
         Com::printFLN(PSTR("Z-probe height [mm]:"), zProbeHeight);
 
     } else {
+        // H is always the height you measured and R is which Z position you want to assign it.
         float z = ZProbeHandler::runProbe();
         if (z == ILLEGAL_Z_PROBE) {
             GCode::fatalError(PSTR("G30 probing failed!"));
@@ -477,7 +486,7 @@ void GCode_30(GCode* com) {
                 z += zCorr;
             }
 #endif
-            Motion1::g92Offsets[Z_AXIS] = o - h;
+            Motion1::g92Offsets[Z_AXIS] = o - h; // o = what it should be official - h = here I am
             Motion1::currentPosition[Z_AXIS] = z + h + Motion1::minPos[Z_AXIS];
             Motion1::updatePositionsFromCurrent();
             Motion1::setAxisHomed(Z_AXIS, true);
@@ -489,7 +498,7 @@ void GCode_30(GCode* com) {
 #endif
 }
 
-void GCode_31(GCode* com) {
+void __attribute__((weak)) GCode_31(GCode* com) {
     // G31 display hall sensor output
     if (ZProbe != nullptr) {
         ZProbe->update();
@@ -498,9 +507,9 @@ void GCode_31(GCode* com) {
     }
 }
 
-void GCode_32(GCode* com) {
+void __attribute__((weak)) GCode_32(GCode* com) {
     bool ok = Leveling::execute_G32(com);
-    if (ok && Motion1::homeDir[Z_AXIS] > 0 && ZProbe != nullptr) {
+    if (ok && Motion1::homeDir[Z_AXIS] > 0 && ZProbe != nullptr && !Printer::breakLongCommand) {
         bool oldDistortion = Leveling::isDistortionEnabled();
         Leveling::setDistortionEnabled(false);
 
@@ -513,7 +522,9 @@ void GCode_32(GCode* com) {
                                    (Motion1::minPosOff[Y_AXIS] + Motion1::maxPosOff[Y_AXIS]) * 0.5, zTheroetical);
         ok = Motion1::moveByOfficial(Motion1::tmpPosition, Motion1::moveFeedrate[X_AXIS], false);
         if (ok) {
-            ZProbeHandler::activate();
+            ok &= ZProbeHandler::activate();
+        }
+        if (ok) {
             zMeasured = ZProbeHandler::runProbe();
             ZProbeHandler::deactivate();
             ok = zMeasured != ILLEGAL_Z_PROBE;
@@ -533,31 +544,41 @@ void GCode_32(GCode* com) {
     }
 }
 
-void GCode_33(GCode* com) {
+void __attribute__((weak)) GCode_33(GCode* com) {
     Leveling::execute_G33(com);
 }
 
-void GCode_90(GCode* com) {
+void __attribute__((weak)) GCode_90(GCode* com) {
     Printer::relativeCoordinateMode = false;
-    if (com->internalCommand)
+    if (com->internalCommand) {
         Com::printInfoFLN(PSTR("Absolute positioning"));
+    }
 }
 
-void GCode_91(GCode* com) {
+void __attribute__((weak)) GCode_91(GCode* com) {
     Printer::relativeCoordinateMode = true;
-    if (com->internalCommand)
+    if (com->internalCommand) {
         Com::printInfoFLN(PSTR("Relative positioning"));
+    }
 }
 
-void GCode_92(GCode* com) {
+void __attribute__((weak)) GCode_92(GCode* com) {
     Motion1::fillPosFromGCode(*com, Motion1::tmpPosition, IGNORE_COORDINATE);
+    bool changed = false;
     FOR_ALL_AXES(i) {
         if (i != E_AXIS && Motion1::tmpPosition[i] != IGNORE_COORDINATE) {
             Motion1::g92Offsets[i] = Motion1::tmpPosition[i] - Motion1::currentPosition[i];
+            changed = true;
         }
     }
     if (com->hasE()) {
         Motion1::destinationPositionTransformed[E_AXIS] = Motion1::currentPosition[E_AXIS] = Motion1::currentPositionTransformed[E_AXIS] = Printer::convertToMM(com->E);
+        changed = true;
+    }
+    if (!changed) {
+        FOR_ALL_AXES(i) {
+            Motion1::g92Offsets[i] = 0;
+        }
     }
     // if (com->hasX() || com->hasY() || com->hasZ()) {
     Com::printF(PSTR("X_OFFSET:"), Motion1::g92Offsets[X_AXIS], 3);
@@ -583,7 +604,7 @@ void GCode_92(GCode* com) {
 // G100 R with X Y or Z flag error, sets only floor or radius, not both.
 // G100 R[n] Add n to radius. Adjust to be above floor if necessary
 // G100 R[0] set radius based on current z measurement. Moves to (0,0,0)
-void GCode_100(GCode* com) {
+void __attribute__((weak)) GCode_100(GCode* com) {
     /*
 #if DRIVE_SYSTEM == DELTA
     float currentZmm = Printer::currentPosition[Z_AXIS];
@@ -666,7 +687,7 @@ void GCode_100(GCode* com) {
 */
 }
 
-void GCode_131(GCode* com) {
+void __attribute__((weak)) GCode_131(GCode* com) {
 #if false && PRINTER_TYPE == PRINTER_TYPE_DELTA
     float cx, cy, cz;
     Printer::realPosition(cx, cy, cz);
@@ -678,7 +699,7 @@ void GCode_131(GCode* com) {
 #endif
 }
 
-void GCode_132(GCode* com) {
+void __attribute__((weak)) GCode_132(GCode* com) {
 #if false && PRINTER_TYPE == PRINTER_TYPE_DELTA
 // TODO: G132 not working
     // G132 Calibrate endstop offsets
@@ -713,7 +734,7 @@ void GCode_132(GCode* com) {
 #endif
 }
 
-void GCode_133(GCode* com) {
+void __attribute__((weak)) GCode_133(GCode* com) {
 #if false && PRINTER_TYPE == PRINTER_TYPE_DELTA
     // G133 Measure steps to top
     bool oldAuto = Motion1::isAutolevelActive();
@@ -742,7 +763,7 @@ void GCode_133(GCode* com) {
 #endif
 }
 
-void GCode_134(GCode* com) {
+void __attribute__((weak)) GCode_134(GCode* com) {
     /*
 #if FEATURE_Z_PROBE && NUM_TOOLS > 1
     // - G134 Px Sx Zx - Calibrate nozzle height difference (need z probe in nozzle!) Px = reference extruder, Sx = only measure extrude x against reference, Zx = add to measured z distance for Sx for correction.
@@ -846,7 +867,7 @@ void GCode_134(GCode* com) {
 */
 }
 
-void GCode_135(GCode* com) {
+void __attribute__((weak)) GCode_135(GCode* com) {
     /* #if DRIVE_SYSTEM == DELTA
     Com::printF(PSTR("CompDelta:"), Printer::currentNonlinearPositionSteps[A_TOWER]);
     Com::printF(Com::tComma, Printer::currentNonlinearPositionSteps[B_TOWER]);
@@ -863,31 +884,31 @@ void GCode_135(GCode* com) {
 */
 }
 
-void GCode_201(GCode* com) {
+void __attribute__((weak)) GCode_201(GCode* com) {
 #if defined(NUM_MOTOR_DRIVERS) && NUM_MOTOR_DRIVERS > 0
     commandG201(*com);
 #endif
 }
 
-void GCode_202(GCode* com) {
+void __attribute__((weak)) GCode_202(GCode* com) {
 #if defined(NUM_MOTOR_DRIVERS) && NUM_MOTOR_DRIVERS > 0
     commandG202(*com);
 #endif
 }
 
-void GCode_203(GCode* com) {
+void __attribute__((weak)) GCode_203(GCode* com) {
 #if defined(NUM_MOTOR_DRIVERS) && NUM_MOTOR_DRIVERS > 0
     commandG203(*com);
 #endif
 }
 
-void GCode_204(GCode* com) {
+void __attribute__((weak)) GCode_204(GCode* com) {
 #if defined(NUM_MOTOR_DRIVERS) && NUM_MOTOR_DRIVERS > 0
     commandG204(*com);
 #endif
 }
 
-void GCode_205(GCode* com) {
+void __attribute__((weak)) GCode_205(GCode* com) {
 #if defined(NUM_MOTOR_DRIVERS) && NUM_MOTOR_DRIVERS > 0
     commandG205(*com);
 #endif

@@ -136,7 +136,7 @@ bool PrinterType::positionAllowed(float pos[NUM_AXES], float zOfficial) {
         return true;
     }
     // Extra contrain to protect Z conditionbased on official coordinate system
-    if (zOfficial < Motion1::minPos[Z_AXIS] || zOfficial > Motion1::maxPos[Z_AXIS]) {
+    if (zOfficial < Motion1::minPos[Z_AXIS] - 0.01 || zOfficial > Motion1::maxPos[Z_AXIS] + 0.01) {
         return false;
     }
     for (fast8_t i = 0; i <= A_AXIS; i++) {
@@ -151,7 +151,7 @@ bool PrinterType::positionAllowed(float pos[NUM_AXES], float zOfficial) {
                 if (pos[i] < Motion1::minPos[A_AXIS] + Motion1::rotMin[X_AXIS] || pos[A_AXIS] > Motion1::maxPos[i] + Motion1::rotMax[X_AXIS]) {
                     return false;
                 }
-            } else if (pos[i] < Motion1::minPos[i] || pos[i] > Motion1::maxPos[i]) {
+            } else if (pos[i] < Motion1::minPosOff[i] || pos[i] > Motion1::maxPosOff[i]) {
                 return false;
             }
             // Com::printFLN(PSTR(" hit"));
@@ -169,8 +169,8 @@ void PrinterType::closestAllowedPositionWithNewXYOffset(float pos[NUM_AXES], flo
         Tool::minMaxOffsetForAxis(i, tOffMin, tOffMax);
 
         float p = pos[i] - offsets[i];
-        float minP = Motion1::minPos[i] + safety + tOffMax - tOffMin;
-        float maxP = Motion1::maxPos[i] - safety + tOffMax - tOffMin;
+        float minP = Motion1::minPos[i] + safety - tOffMax;
+        float maxP = Motion1::maxPos[i] - safety - tOffMin;
         if (p < minP) {
             pos[i] += minP - p;
         } else if (p > maxP) {
@@ -548,8 +548,27 @@ void PrinterType::M290(GCode* com) {
     InterruptProtectedBlock lock;
     if (com->hasZ()) {
         float z = constrain(com->Z, -2, 2);
+        Motion1::totalBabystepZ += z;
         Motion2::openBabysteps[Z_AXIS] += z * Motion1::resolution[Z_AXIS];
     }
+    lock.unprotect();
+    Com::printFLN(PSTR("BabystepZ:"), Motion1::totalBabystepZ, 4);
+}
+
+bool PrinterType::runMCode(GCode* com) {
+    switch (com->M) {
+    case 290:
+        M290(com);
+        return false;
+    case 360:
+        M360();
+        return false;
+    }
+    return true;
+}
+
+bool PrinterType::runGCode(GCode* com) {
+    return false;
 }
 
 PGM_P PrinterType::getGeometryName() {

@@ -4,6 +4,19 @@ const char* const axisNames[] PROGMEM = {
     "X", "Y", "Z", "E", "A", "B", "C"
 };
 
+const int32_t baudrates[] PROGMEM = {
+    38400, 56000, 57600, 76800, 115200, 128000, 230400, 250000, 256000, 460800, 500000, 0
+};
+
+void __attribute__((weak)) menuBabystepZ(GUIAction action, void* data) {
+    DRAW_FLOAT_P(PSTR("Babystep Z:"), Com::tUnitMM, Motion1::totalBabystepZ, 2);
+    if (GUI::handleFloatValueAction(action, v, 0.01f)) {
+        GCode mod;
+        mod.setZ(v - Motion1::totalBabystepZ);
+        PrinterType::M290(&mod);
+    }
+}
+
 void __attribute__((weak)) menuMoveAxisFine(GUIAction action, void* data) {
     int axis = reinterpret_cast<int>(data);
     GUI::flashToStringFlash(GUI::tmpString, PSTR("Move @-Axis (0.01mm):"), axisNames[axis]);
@@ -11,7 +24,7 @@ void __attribute__((weak)) menuMoveAxisFine(GUIAction action, void* data) {
     if (!Tool::getActiveTool()->showMachineCoordinates()) {
         v -= Motion1::g92Offsets[axis];
     }
-    if (GUI::handleFloatValueAction(action, v, Motion1::minPos[axis], Motion1::maxPos[axis], 0.01)) {
+    if (GUI::handleFloatValueAction(action, v, Motion1::minPos[axis], Motion1::maxPos[axis], 0.01f)) {
         Motion1::copyCurrentOfficial(Motion1::tmpPosition);
         Motion1::tmpPosition[axis] = v;
         Motion1::moveByOfficial(Motion1::tmpPosition, Motion1::moveFeedrate[axis], false);
@@ -38,7 +51,7 @@ void __attribute__((weak)) menuMoveAxis(GUIAction action, void* data) {
 
 void __attribute__((weak)) menuMoveE(GUIAction action, void* data) {
     DRAW_FLOAT_P(PSTR("Active Extruder:"), Com::tUnitMM, Motion1::currentPosition[E_AXIS], 2);
-    if (GUI::handleFloatValueAction(action, v, Motion1::minPos[E_AXIS], Motion1::maxPos[E_AXIS], 1.0)) {
+    if (GUI::handleFloatValueAction(action, v, 1.0)) {
         Motion1::setTmpPositionXYZE(IGNORE_COORDINATE, IGNORE_COORDINATE, IGNORE_COORDINATE, v);
         Motion1::moveByOfficial(Motion1::tmpPosition, Motion1::moveFeedrate[E_AXIS], false);
     }
@@ -140,27 +153,38 @@ void __attribute__((weak)) menuMaxSpeed(GUIAction action, void* data) {
 void __attribute__((weak)) menuMaxAcceleration(GUIAction action, void* data) {
     int axis = reinterpret_cast<int>(data);
     GUI::flashToStringFlash(GUI::tmpString, PSTR("Max @ Print Accel.:"), axisNames[axis]);
-    DRAW_FLOAT(GUI::tmpString, Com::tUnitMMPS2, Motion1::maxAcceleration[axis], 0);
+    DRAW_FLOAT(GUI::tmpString, Com::tUnitMMPS2, Motion1::maxAccelerationEEPROM[axis], 0);
     if (GUI::handleFloatValueAction(action, v, 50, 20000, 50)) {
-        Motion1::maxAcceleration[axis] = v;
+        Motion1::maxAcceleration[axis] = Motion1::maxAccelerationEEPROM[axis] = v;
     }
 }
 
 void __attribute__((weak)) menuMaxTravelAcceleration(GUIAction action, void* data) {
     int axis = reinterpret_cast<int>(data);
     GUI::flashToStringFlash(GUI::tmpString, PSTR("Max @ Travel Accel.:"), axisNames[axis]);
-    DRAW_FLOAT(GUI::tmpString, Com::tUnitMMPS2, Motion1::maxTravelAcceleration[axis], 0);
+    DRAW_FLOAT(GUI::tmpString, Com::tUnitMMPS2, Motion1::maxTravelAccelerationEEPROM[axis], 0);
     if (GUI::handleFloatValueAction(action, v, 50, 20000, 50)) {
-        Motion1::maxTravelAcceleration[axis] = v;
+        Motion1::maxTravelAcceleration[axis] = Motion1::maxTravelAccelerationEEPROM[axis] = v;
     }
 }
 
 void __attribute__((weak)) menuMaxYank(GUIAction action, void* data) {
     int axis = reinterpret_cast<int>(data);
     GUI::flashToStringFlash(GUI::tmpString, PSTR("Max @ Jerk:"), axisNames[axis]);
-    DRAW_FLOAT(GUI::tmpString, Com::tUnitMMPS, Motion1::maxYank[axis], 0);
+    DRAW_FLOAT(GUI::tmpString, Com::tUnitMMPS, Motion1::maxYank[axis], 1);
     if (GUI::handleFloatValueAction(action, v, 0.1, 100, 0.1)) {
         Motion1::maxYank[axis] = v;
+    }
+}
+void __attribute__((weak)) menuConfigVolume(GUIAction action, void* data) {
+    DRAW_LONG_P(PSTR("Tone/UI Volume:"), Com::tUnitPercent, Printer::toneVolume);
+    if (GUI::handleLongValueAction(action, v, 0, 100, 1)) {
+        if (v > MINIMUM_TONE_VOLUME && Printer::toneVolume <= MINIMUM_TONE_VOLUME) {
+            BeeperSourceBase::muteAll(false);
+        } else if (v <= MINIMUM_TONE_VOLUME && Printer::toneVolume > MINIMUM_TONE_VOLUME) {
+            BeeperSourceBase::muteAll(true);
+        }
+        Printer::toneVolume = v;
     }
 }
 void __attribute__((weak)) menuConfigAxis(GUIAction action, void* data) {
@@ -181,6 +205,94 @@ void __attribute__((weak)) menuConfigAxis(GUIAction action, void* data) {
     GUI::menuEnd(action);
 }
 
+// RETRACT MENUS
+
+void __attribute__((weak)) menuRetractLength(GUIAction action, void* data) {
+    GUI::flashToString(GUI::tmpString, PSTR("Retract Length:"));
+    DRAW_FLOAT(GUI::tmpString, Com::tUnitMM, Motion1::retractLength, 2);
+    if (GUI::handleFloatValueAction(action, v, 0.0f, 20.0f, 0.05f)) {
+        Motion1::retractLength = v;
+    }
+}
+void __attribute__((weak)) menuRetractSpeed(GUIAction action, void* data) {
+    GUI::flashToString(GUI::tmpString, PSTR("Retract Speed:"));
+    DRAW_FLOAT(GUI::tmpString, Com::tUnitMMPS, Motion1::retractSpeed, 2);
+    if (GUI::handleFloatValueAction(action, v, 0.1f, 100.0f, 2.5f)) {
+        Motion1::retractSpeed = v;
+    }
+}
+void __attribute__((weak)) menuRetractUndoSpeed(GUIAction action, void* data) {
+    GUI::flashToString(GUI::tmpString, PSTR("Unretract Speed:"));
+    DRAW_FLOAT(GUI::tmpString, Com::tUnitMMPS, Motion1::retractUndoSpeed, 2);
+    if (GUI::handleFloatValueAction(action, v, 0.1f, 100.0f, 2.5f)) {
+        Motion1::retractUndoSpeed = v;
+    }
+}
+void __attribute__((weak)) menuRetractZLift(GUIAction action, void* data) {
+    GUI::flashToString(GUI::tmpString, PSTR("Retract zLift:"));
+    DRAW_FLOAT(GUI::tmpString, Com::tUnitMM, Motion1::retractZLift, 2);
+    if (GUI::handleFloatValueAction(action, v, 0.0f, 5.0f, 0.05f)) {
+        Motion1::retractZLift = v;
+    }
+}
+void __attribute__((weak)) menuRetractUndoExtraLength(GUIAction action, void* data) {
+    GUI::flashToString(GUI::tmpString, PSTR("Extra Unretract:"));
+    DRAW_FLOAT(GUI::tmpString, Com::tUnitMM, Motion1::retractUndoExtraLength, 2);
+    if (GUI::handleFloatValueAction(action, v, -20.0f, 20.0f, 0.05f)) {
+        Motion1::retractUndoExtraLength = v; // Can be negative
+    }
+}
+
+// FOR TOOLS
+void __attribute__((weak)) menuRetractLongLength(GUIAction action, void* data) {
+    GUI::flashToString(GUI::tmpString, PSTR("Long Retract Length:"));
+    DRAW_FLOAT(GUI::tmpString, Com::tUnitMM, Motion1::retractLongLength, 2);
+    if (GUI::handleFloatValueAction(action, v, 0.0f, 20.0f, 0.05f)) {
+        Motion1::retractLongLength = v;
+    }
+}
+void __attribute__((weak)) menuRetractUndoExtraLongLength(GUIAction action, void* data) {
+    GUI::flashToString(GUI::tmpString, PSTR("Long Extra Unretract:"));
+    DRAW_FLOAT(GUI::tmpString, Com::tUnitMM, Motion1::retractUndoExtraLongLength, 2);
+    if (GUI::handleFloatValueAction(action, v, -20.0f, 20.0f, 0.05f)) {
+        Motion1::retractUndoExtraLongLength = v; // Can be negative
+    }
+}
+
+void __attribute__((weak)) menuConfigRetraction(GUIAction action, void* data) {
+#if FEATURE_RETRACTION
+    GUI::menuStart(action);
+    GUI::menuTextP(action, PSTR("= Config Retract ="), true);
+    GUI::menuBack(action);
+
+    if (!Motion1::retractLength) {
+        GUI::menuSelectableP(action, PSTR("Length:Off"), menuRetractLength, nullptr, GUIPageType::FIXED_CONTENT);
+    } else {
+        GUI::menuFloatP(action, PSTR("Length:"), Motion1::retractLength, 2, menuRetractLength, nullptr, GUIPageType::FIXED_CONTENT);
+
+        GUI::menuFloatP(action, PSTR("Speed:"), Motion1::retractSpeed, 2, menuRetractSpeed, nullptr, GUIPageType::FIXED_CONTENT);
+
+        GUI::menuFloatP(action, PSTR("Undo Speed:"), Motion1::retractUndoSpeed, 2, menuRetractUndoSpeed, nullptr, GUIPageType::FIXED_CONTENT);
+
+        GUI::menuFloatP(action, PSTR("Extra Undo:"), Motion1::retractUndoExtraLength, 2, menuRetractUndoExtraLength, nullptr, GUIPageType::FIXED_CONTENT);
+
+        GUI::menuFloatP(action, PSTR("ZLift:"), Motion1::retractZLift, 2, menuRetractZLift, nullptr, GUIPageType::FIXED_CONTENT);
+
+        GUI::menuOnOffP(action, PSTR("Autoretract:"), Printer::isAutoretract(), directAction, reinterpret_cast<void*>(GUI_DIRECT_ACTION_TOGGLE_AUTORETRACTIONS), GUIPageType::ACTION);
+
+#if NUM_TOOLS > 1
+        GUI::menuFloatP(action, PSTR("Long Length:"), Motion1::retractLongLength, 2, menuRetractLongLength, nullptr, GUIPageType::FIXED_CONTENT);
+
+        GUI::menuFloatP(action, PSTR("Extra Long Undo:"), Motion1::retractUndoExtraLongLength, 2, menuRetractUndoExtraLongLength, nullptr, GUIPageType::FIXED_CONTENT);
+#endif
+    }
+    GUI::menuEnd(action);
+#endif
+}
+
+// END RETRACT MENUS
+
+// PROBE MENUS
 void __attribute__((weak)) menuProbeSpeed(GUIAction action, void* data) {
     GUI::flashToString(GUI::tmpString, PSTR("Probing Speed:"));
     DRAW_FLOAT(GUI::tmpString, Com::tUnitMMPS, ZProbeHandler::getSpeed(), 1);
@@ -204,9 +316,8 @@ void __attribute__((weak)) menuProbeBedDistance(GUIAction action, void* data) {
 }
 
 void __attribute__((weak)) menuConfigProbe(GUIAction action, void* data) {
-    GUI::flashToString(GUI::tmpString, PSTR("= Config Probe ="));
     GUI::menuStart(action);
-    GUI::menuText(action, GUI::tmpString, true);
+    GUI::menuTextP(action, PSTR("= Config Probe ="), true);
     GUI::menuBack(action);
 
     //generic probe options
@@ -222,8 +333,43 @@ void __attribute__((weak)) menuConfigProbe(GUIAction action, void* data) {
 
     GUI::menuEnd(action);
 }
-const long baudrates[] PROGMEM = { 38400, 56000, 57600, 76800, 115200, 128000, 230400, 250000, 256000,
-                                   460800, 500000, 0 };
+
+class GCode;
+void __attribute__((weak)) menuRunProbeOnce(GUIAction action, void* data) {
+#if Z_PROBE_TYPE != Z_PROBE_TYPE_NONE
+    if (!Printer::isHoming() && !Printer::isZProbingActive()) {
+        Printer::setZProbingActive(true);
+        GCode innerCode;
+        GCode_30(&innerCode);
+    }
+#endif
+}
+void __attribute__((weak)) menuRunAutolevel(GUIAction action, void* data) {
+#if LEVELING_METHOD != LEVELING_METHOD_NONE && Z_PROBE_TYPE != Z_PROBE_TYPE_NONE
+    if (!Printer::isHoming() && !Printer::isZProbingActive()) {
+        Printer::setZProbingActive(true);
+        GCode innerCode;
+        GCode_32(&innerCode);
+    }
+#endif
+}
+void __attribute__((weak)) menuControlProbe(GUIAction action, void* data) {
+#if Z_PROBE_TYPE != Z_PROBE_TYPE_NONE
+    GUI::menuStart(action);
+    GUI::menuTextP(action, PSTR("= Control Probe ="), true);
+    GUI::menuBack(action);
+
+    GUI::menuSelectableP(action, PSTR("Run Single Probe"), menuRunProbeOnce, nullptr, GUIPageType::ACTION);
+#if LEVELING_METHOD != LEVELING_METHOD_NONE // Odd case but best to check anyways
+    GUI::menuSelectableP(action, PSTR("Run Autoleveling"), menuRunAutolevel, nullptr, GUIPageType::ACTION);
+#endif
+    //unique probe controls
+    if (ZProbeHandler::hasControlMenu()) {
+        ZProbeHandler::showControlMenu(action);
+    }
+    GUI::menuEnd(action);
+#endif
+}
 
 void __attribute__((weak)) menuBaudrate(GUIAction action, void* data) {
     int32_t v = baudrate;
@@ -236,14 +382,19 @@ void __attribute__((weak)) menuBaudrate(GUIAction action, void* data) {
         int32_t rate;
         do {
             rate = pgm_read_dword(&(baudrates[(uint8_t)p]));
-            if (rate == baudrate)
+            if (rate == baudrate) {
                 break;
+            }
             p++;
         } while (rate != 0);
-        if (rate == 0)
+        if (rate == 0) {
             p -= 2;
+        }
         if (GUI::handleLongValueAction(action, p, 0, 10, 1)) {
             baudrate = pgm_read_dword(&(baudrates[p]));
+        } else if (action == GUIAction::CLICK) {
+            // Update baudrates on click/pop
+            HAL::serialSetBaudrate(baudrate);
         }
     }
 }
@@ -273,6 +424,9 @@ void __attribute__((weak)) menuInfo(GUIAction action, void* data) {
     GUI::menuTextP(action, Com::tFirmwareCompiled);
     GUI::menuTextP(action, Com::tPrinterName);
     GUI::menuTextP(action, Com::tVendor);
+    if (Printer::isNativeUSB()) {
+        GUI::menuTextP(action, PSTR("Using Native USB"));
+    }
     GUI::menuEnd(action);
 }
 
@@ -288,7 +442,11 @@ void __attribute__((weak)) menuMove(GUIAction action, void* data) {
             continue;
         }
         GUI::flashToStringFlash(GUI::tmpString, PSTR("Move @:"), axisNames[i]);
-        GUI::menuFloat(action, GUI::tmpString, Motion1::getShowPosition(i), 2, menuMoveAxis, (void*)(int)i, GUIPageType::FIXED_CONTENT);
+        if (i == E_AXIS) {
+            GUI::menuFloat(action, GUI::tmpString, Motion1::getShowPosition(i), 2, menuMoveE, (void*)(int)i, GUIPageType::FIXED_CONTENT);
+        } else {
+            GUI::menuFloat(action, GUI::tmpString, Motion1::getShowPosition(i), 2, menuMoveAxis, (void*)(int)i, GUIPageType::FIXED_CONTENT);
+        }
     }
     GUI::menuEnd(action);
 }
@@ -406,16 +564,23 @@ void __attribute__((weak)) menuControls(GUIAction action, void* data) {
     GUI::menuSelectable(action, GUI::tmpString, menuSpeedMultiplier, nullptr, GUIPageType::FIXED_CONTENT);
     GUI::flashToStringLong(GUI::tmpString, PSTR("Flow: @%"), Printer::extrudeMultiply);
     GUI::menuSelectable(action, GUI::tmpString, menuFlowMultiplier, nullptr, GUIPageType::FIXED_CONTENT);
+    GUI::flashToStringFloat(GUI::tmpString, PSTR("Babystep Z: @mm"), Motion1::totalBabystepZ, 2);
+    GUI::menuSelectable(action, GUI::tmpString, menuBabystepZ, nullptr, GUIPageType::FIXED_CONTENT);
 #ifndef NO_LIGHT_CONTROL
     GUI::menuSelectableP(action, PSTR("Toggle lights"), directAction, (void*)GUI_DIRECT_ACTION_TOGGLE_LIGHT, GUIPageType::ACTION);
 #endif
-#if NUM_BEEPERS > 0
-    GUI::menuSelectableP(action, PSTR("Toggle sounds"), directAction, (void*)GUI_DIRECT_ACTION_TOGGLE_SOUNDS, GUIPageType::ACTION);
-#endif
+#if PRINTER_TYPE == PRINTER_TYPE_DELTA
+    // Deltas have only home all so move the only function up
+    GUI::menuSelectableP(action, PSTR("Home"), directAction, (void*)GUI_DIRECT_ACTION_HOME_ALL, GUIPageType::ACTION);
+#else
     GUI::menuSelectableP(action, PSTR("Home"), menuHome, nullptr, GUIPageType::MENU);
+#endif
     GUI::menuSelectableP(action, PSTR("Move"), menuMove, nullptr, GUIPageType::MENU);
 #if NUM_FANS > 0
     GUI::menuSelectableP(action, PSTR("Fans"), menuFans, nullptr, GUIPageType::MENU);
+#endif
+#if Z_PROBE_TYPE != Z_PROBE_TYPE_NONE
+    GUI::menuSelectableP(action, PSTR("Z-Probe"), menuControlProbe, nullptr, GUIPageType::MENU);
 #endif
     GUI::menuSelectableP(action, PSTR("Disable Motors"), directAction, (void*)GUI_DIRECT_ACTION_DISABLE_MOTORS, GUIPageType::ACTION);
 #undef IO_TARGET
@@ -475,6 +640,8 @@ void __attribute__((weak)) menuTune(GUIAction action, void* data) {
     GUI::menuSelectable(action, GUI::tmpString, menuSpeedMultiplier, nullptr, GUIPageType::FIXED_CONTENT);
     GUI::flashToStringLong(GUI::tmpString, PSTR("Flow: @%"), Printer::extrudeMultiply);
     GUI::menuSelectable(action, GUI::tmpString, menuFlowMultiplier, nullptr, GUIPageType::FIXED_CONTENT);
+    GUI::flashToStringFloat(GUI::tmpString, PSTR("Babystep Z: @mm"), Motion1::totalBabystepZ, 2);
+    GUI::menuSelectable(action, GUI::tmpString, menuBabystepZ, nullptr, GUIPageType::FIXED_CONTENT);
     GUI::menuSelectableP(action, PSTR("Home"), menuHome, nullptr, GUIPageType::MENU);
     GUI::menuSelectableP(action, PSTR("Move"), menuMove, nullptr, GUIPageType::MENU);
 #if NUM_FANS > 0
@@ -484,51 +651,57 @@ void __attribute__((weak)) menuTune(GUIAction action, void* data) {
 #undef IO_TARGET
 #define IO_TARGET IO_TARGET_GUI_TUNE
 #include "../io/redefine.h"
+    // Bed and chamber have no own entry so add it and point to temperature manager
+    for (ufast8_t i = 0; i < NUM_HEATED_BEDS; i++) {
+#if NUM_HEATED_BEDS > 1
+        GUI::menuLongP(action, PSTR("Bed "), i + 1, menuTempControl, heatedBeds[i], GUIPageType::MENU);
+#else
+        GUI::menuSelectableP(action, PSTR("Bed "), menuTempControl, heatedBeds[i], GUIPageType::MENU);
+#endif
+    }
+    for (ufast8_t i = 0; i < NUM_HEATED_CHAMBERS; i++) {
+#if NUM_HEATED_CHAMBERS > 1
+        GUI::menuLongP(action, PSTR("Chamber "), i + 1, menuTempControl, heatedChambers[i], GUIPageType::MENU);
+#else
+        GUI::menuSelectableP(action, PSTR("Chamber"), menuTempControl, heatedChambers[i], GUIPageType::MENU);
+#endif
+    }
     GUI::menuEnd(action);
 }
 
 #if SDSUPPORT
+void menuSDPrint(GUIAction action, void* dat);
 void __attribute__((weak)) menuSDStartPrint(GUIAction action, void* data) {
     int pos = reinterpret_cast<int>(data);
-    int count = -1;
-    dir_t* p = nullptr;
-    FatFile* root = sd.fat.vwd();
-    FatFile file;
-    root->rewind();
     if (pos == -1) {
         if (GUI::folderLevel == 0) {
             return;
         }
         char* p = GUI::cwd;
-        while (*p)
+        while (*p) {
             p++;
+        }
         p--;
         p--;
         while (*p != '/') {
             p--;
         }
-        p++;
-        *p = 0;
+        *(++p) = '\0';
         GUI::folderLevel--;
-        GUI::cursorRow[GUI::level] = 1; // top of new directory
-        GUI::topRow[GUI::level] = 0;
-        sd.fat.chdir(GUI::cwd);
+        sd.fileSystem.chdir(GUI::cwd);
+        GUI::replace(menuSDPrint, data, GUIPageType::MENU);
         return;
     }
-    while (file.openNext(root, O_READ)) {
-        count++;
-        HAL::pingWatchdog();
-        if (count < pos) {
-            file.close();
-            continue;
-        }
-        file.getName(tempLongFilename, LONG_FILENAME_LENGTH);
+    sd_file_t file;
+    if (file.open(sd.fileSystem.cwv(), pos, O_RDONLY)) {
+        sd.getFN(file);
         if (file.isDir()) {
             file.close();
             char* name = tempLongFilename;
             char* p = GUI::cwd;
-            while (*p)
+            while (*p) {
                 p++;
+            }
             if (GUI::folderLevel >= SD_MAX_FOLDER_DEPTH) {
                 return;
             }
@@ -536,61 +709,213 @@ void __attribute__((weak)) menuSDStartPrint(GUIAction action, void* data) {
                 *p++ = *name++;
             }
             *p++ = '/';
-            *p = 0;
+            *p = '\0';
             GUI::folderLevel++;
-            GUI::cursorRow[GUI::level] = 1; // top of new directory
-            GUI::topRow[GUI::level] = 0;
-            sd.fat.chdir(GUI::cwd);
+            sd.fileSystem.chdir(GUI::cwd);
+            GUI::replace(menuSDPrint, data, GUIPageType::MENU);
         } else { // File for print selected instead
             file.close();
-            sd.file.close();
-            sd.fat.chdir(GUI::cwd);
-            if (sd.selectFile(tempLongFilename, false)) {
+            sd.fileSystem.chdir(GUI::cwd);
+            if (sd.selectFile(tempLongFilename)) {
+                GUI::pop();
+                GUI::cwd[0] = '/'; // reset the GUI directory
+                GUI::cwd[1] = '\0';
+                GUI::folderLevel = 0u;
                 sd.startPrint();
-                GUI::level = 0;
             }
         }
-        return;
     }
 }
+static bool menuSDFilterName(sd_file_t* file, char* tempFilename, size_t size) {
+    if (!file || (tempFilename && !size)) {
+        return false;
+    }
+#if DISABLED(SD_MENU_SHOW_HIDDEN_FILES)
+    if (file->isHidden()) {
+        return false;
+    }
+#endif
+    if (tempFilename) {
+        if (tempFilename[0] == '.' && tempFilename[1] != '.') {
+            return false; // MAC CRAP
+        }
+    }
+    if (file->isDir()) {
+        if (GUI::folderLevel < SD_MAX_FOLDER_DEPTH) {
+            if (tempFilename) {
+                GUI::flashToStringString(GUI::tmpString, PSTR("# @"), tempFilename);
+                memcpy(tempFilename, GUI::tmpString, size);
+            }
+        } else {
+            return false; // Hide any more folders since we can't go deeper.
+        }
+    }
+    return true;
+}
+#if ENABLED(SD_MENU_CACHE_SCROLL_ENTRIES)
+constexpr uint8_t menuSDCacheRows = 5u;
+constexpr uint8_t menuSDCacheNameLen = LONG_FILENAME_LENGTH;
+static uint16_t menuSDCacheLastIndexPos = 0u;
+static struct menuSDCacheStruct {
+    uint16_t dirIndexPos;
+    char name[menuSDCacheNameLen + 1];
+} menuSDNameCache[menuSDCacheRows] = { 0 };
 
 void __attribute__((weak)) menuSDPrint(GUIAction action, void* data) {
     GUI::menuStart(action);
-    GUI::menuTextP(action, PSTR("= SD Print ="), true);
-    GUI::menuBack(action);
-    int count = -1;
-    dir_t* p = nullptr;
-    FatFile* root = sd.fat.vwd();
-    FatFile file;
-    root->rewind();
-    if (GUI::folderLevel > 0) {
-        GUI::menuSelectableP(action, PSTR("# Parent Directory"), menuSDStartPrint, (void*)count, GUIPageType::ACTION);
-    }
-    while (file.openNext(root, O_READ)) {
-        count++;
-        HAL::pingWatchdog();
-        file.getName(tempLongFilename, LONG_FILENAME_LENGTH);
-        if (GUI::folderLevel >= SD_MAX_FOLDER_DEPTH && strcmp(tempLongFilename, "..") == 0) {
-            file.close();
-            continue;
-        }
-        if (tempLongFilename[0] == '.' && tempLongFilename[1] != '.') {
-            file.close();
-            continue; // MAC CRAP
-        }
-        if (file.isDir()) {
-            GUI::flashToStringString(GUI::tmpString, PSTR("# @"), tempLongFilename);
-            GUI::menuSelectable(action, GUI::tmpString, menuSDStartPrint, (void*)count, GUIPageType::ACTION);
-        } else {
-            GUI::menuSelectable(action, tempLongFilename, menuSDStartPrint, (void*)count, GUIPageType::ACTION);
-        }
-        file.close();
-        if (count > 200) // Arbitrary maximum, limited only by how long someone would scroll
-            break;
+    if (sd.state < SDState::SD_MOUNTED) {
+        // User was still inside the menu when their sdcard ejected.
+        GUI::pop();
+        GUI::refresh();
+        return;
     }
 
+    if (GUI::folderLevel > 0u) {
+        GUI::menuText(action, GUI::cwd, true);
+        GUI::menuSelectableP(action, PSTR("# Parent Directory"), menuSDStartPrint, reinterpret_cast<void*>(-1), GUIPageType::ACTION);
+    } else {
+        if (sd.volumeLabel[0u] == '\0') {
+            GUI::menuTextP(action, PSTR("= SD Print ="), true);
+        } else {
+            GUI::menuText(action, sd.volumeLabel, true);
+        }
+        GUI::menuBack(action);
+    }
+
+    static bool reversedDir = false;
+    static uint16_t lastRowDirItem = 0u, dirItemCount = 0u, dirMaxIndex = 0u;
+    static uint8_t lastRow = 0u;
+    sd.fileSystem.chdir(GUI::cwd);
+    sd_file_t curDir = sd.fileSystem.open(GUI::cwd);
+
+    if (action == GUIAction::ANALYSE) {
+        curDir.rewind();
+        lastRow = 0u;
+        lastRowDirItem = 0u;
+        dirItemCount = 0u;
+        dirMaxIndex = 0u;
+        size_t renderedRows = 0u;
+        reversedDir = false;
+        memset(menuSDNameCache, 0u, sizeof(menuSDNameCache));
+        sd.doForDirectory(curDir, [&](sd_file_t file, sd_file_t dir, size_t depth) {
+            if (menuSDFilterName(&file, sd.getFN(file), menuSDCacheNameLen)) {
+                if (renderedRows < menuSDCacheRows) {
+                    memcpy(menuSDNameCache[renderedRows].name, tempLongFilename, menuSDCacheNameLen);
+                    menuSDNameCache[renderedRows++].dirIndexPos = file.dirIndex();
+                }
+                if (file.dirIndex() > dirMaxIndex) {
+                    dirMaxIndex = file.dirIndex();
+                }
+                dirItemCount++;
+            }
+            return true;
+        });
+        menuSDCacheLastIndexPos = menuSDNameCache[menuSDCacheRows - 1u].dirIndexPos;
+    }
+    for (size_t i = 0u; i < menuSDCacheRows; i++) {
+        if (menuSDNameCache[i].name[0u] != '\0') { // just in case.
+            GUI::menuSelectable(action, menuSDNameCache[i].name, menuSDStartPrint,
+                                reinterpret_cast<void*>(menuSDNameCache[i].dirIndexPos), GUIPageType::ACTION);
+        }
+    }
+    uint8_t curRow = GUI::cursorRow[GUI::level];
+    if (GUI::length[GUI::level] > menuSDCacheRows + 1) {
+        if (action == GUIAction::NEXT
+            && curRow == lastRow
+            && menuSDCacheLastIndexPos < dirMaxIndex
+            && curRow >= GUI::maxCursorRow[GUI::level]) {
+            if (reversedDir) {
+                menuSDCacheLastIndexPos = menuSDNameCache[menuSDCacheRows - 1u].dirIndexPos;
+            }
+            reversedDir = false;
+            uint16_t startDirIndex = menuSDCacheLastIndexPos; // caps scan max
+            bool hit = false;
+            sd_file_t file;
+            while (!hit && ((menuSDCacheLastIndexPos - startDirIndex) < 0xff)
+                   && menuSDCacheLastIndexPos < dirMaxIndex) {
+                if (file.open(&curDir, ++menuSDCacheLastIndexPos, O_RDONLY)
+                    && menuSDFilterName(&file, sd.getFN(file), menuSDCacheNameLen)) {
+                    memmove(&menuSDNameCache[0u], &menuSDNameCache[1u], (menuSDCacheRows - 1u) * sizeof(menuSDNameCache[0u]));
+                    memcpy(menuSDNameCache[menuSDCacheRows - 1u].name, tempLongFilename, menuSDCacheNameLen);
+                    menuSDNameCache[menuSDCacheRows - 1u].dirIndexPos = file.dirIndex();
+                    hit = true;
+                    lastRowDirItem++;
+                }
+            }
+            file.close();
+        } else if (curRow <= GUI::topRow[GUI::level]) {
+            if (GUI::nextAction == GUIAction::PREVIOUS && menuSDCacheLastIndexPos) {
+                if (!reversedDir) {
+                    menuSDCacheLastIndexPos = menuSDNameCache[0u].dirIndexPos;
+                }
+                reversedDir = true;
+                bool hit = false;
+                sd_file_t file;
+                while (!hit && menuSDCacheLastIndexPos) {
+                    if (file.open(&curDir, --menuSDCacheLastIndexPos, O_RDONLY)
+                        && menuSDFilterName(&file, sd.getFN(file), menuSDCacheNameLen)) {
+                        memmove(&menuSDNameCache[1u], &menuSDNameCache[0u], (menuSDCacheRows - 1u) * sizeof(menuSDNameCache[0u]));
+                        memcpy(menuSDNameCache[0u].name, tempLongFilename, menuSDCacheNameLen);
+                        menuSDNameCache[0u].dirIndexPos = file.dirIndex();
+                        hit = true;
+                        lastRowDirItem--;
+                    }
+                }
+                file.close();
+                if (menuSDCacheLastIndexPos) {
+                    GUI::cursorRow[GUI::level]++;
+                }
+            }
+        }
+        uint16_t curScrollPos = lastRowDirItem;
+        curScrollPos += !lastRowDirItem ? (GUI::topRow[GUI::level] + 1u) : 3u; 
+        GUI::showScrollbar(action, static_cast<float>(curScrollPos - 1u) / static_cast<float>(dirItemCount - 3u), 5u, dirItemCount);
+    }
+    curDir.close();
+    lastRow = curRow; // For scrolling to the last row without doing a scan/moving the list.
     GUI::menuEnd(action);
 }
+#else
+void __attribute__((weak)) menuSDPrint(GUIAction action, void* data) {
+    GUI::menuStart(action);
+    if (sd.state < SDState::SD_MOUNTED) {
+        // User was still inside the menu when their sdcard ejected.
+        GUI::pop();
+        GUI::refresh();
+        return;
+    }
+
+    if (GUI::folderLevel > 0u) {
+        GUI::menuText(action, GUI::cwd, true);
+        GUI::menuSelectableP(action, PSTR("# Parent Directory"), menuSDStartPrint, reinterpret_cast<void*>(-1), GUIPageType::ACTION);
+    } else {
+        if (sd.volumeLabel[0u] == '\0') {
+            GUI::menuTextP(action, PSTR("= SD Print ="), true);
+        } else {
+            GUI::menuText(action, sd.volumeLabel, true);
+        }
+        GUI::menuBack(action);
+    }
+
+    sd.fileSystem.chdir(GUI::cwd);
+    sd_file_t curDir = sd.fileSystem.open(GUI::cwd);
+    ufast8_t count = 0u;
+    sd.doForDirectory(curDir, [&](sd_file_t file, sd_file_t dir, size_t depth) {
+        if (menuSDFilterName(&file, sd.getFN(file), sizeof(tempLongFilename))) {
+            GUI::menuSelectable(action, tempLongFilename, menuSDStartPrint, reinterpret_cast<void*>(file.dirIndex()), GUIPageType::ACTION);
+            if (count++ > 200u) { // Arbitrary maximum, limited only by how long someone would scroll
+                return false;
+            }
+        }
+        return true;
+    });
+    /* if (count > 3u) {
+        GUI::showScrollbar(action);
+    } */
+    curDir.close();
+    GUI::menuEnd(action);
+}
+#endif
 #endif
 
 void __attribute__((weak)) menuConfig(GUIAction action, void* data) {
@@ -598,7 +923,13 @@ void __attribute__((weak)) menuConfig(GUIAction action, void* data) {
     GUI::menuTextP(action, PSTR("= Configuration = "), true);
     GUI::menuBack(action);
 #if EEPROM_MODE > 0
-    GUI::menuLongP(action, PSTR("Baudrate:"), baudrate, menuBaudrate, nullptr, GUIPageType::FIXED_CONTENT);
+    if (!Printer::isNativeUSB()) {
+        GUI::menuLongP(action, PSTR("Baudrate:"), baudrate, menuBaudrate, nullptr, GUIPageType::FIXED_CONTENT);
+    }
+#endif
+#if NUM_BEEPERS > 0
+    GUI::flashToStringLong(GUI::tmpString, PSTR("Tone Volume: @%"), Printer::toneVolume);
+    GUI::menuSelectable(action, GUI::tmpString, menuConfigVolume, nullptr, GUIPageType::FIXED_CONTENT);
 #endif
     FOR_ALL_AXES(i) {
         if (i == E_AXIS) {
@@ -609,6 +940,9 @@ void __attribute__((weak)) menuConfig(GUIAction action, void* data) {
     }
 #if Z_PROBE_TYPE != Z_PROBE_TYPE_NONE
     GUI::menuSelectableP(action, PSTR("Z-Probe"), menuConfigProbe, nullptr, GUIPageType::MENU);
+#endif
+#if FEATURE_RETRACTION
+    GUI::menuSelectableP(action, PSTR("Retraction"), menuConfigRetraction, nullptr, GUIPageType::MENU);
 #endif
 #undef IO_TARGET
 #define IO_TARGET IO_TARGET_GUI_CONFIG
@@ -646,24 +980,32 @@ void __attribute__((weak)) mainMenu(GUIAction action, void* data) {
     } else {
         GUI::menuSelectableP(action, PSTR("Controls"), menuControls, nullptr, GUIPageType::MENU);
     }
-#if SDSUPPORT
-    if (sd.sdactive) {
-        if (sd.sdmode == 0 && !Printer::isPrinting()) {
-            GUI::menuSelectableP(action, PSTR("SD Print"), menuSDPrint, nullptr, GUIPageType::MENU);
-        } else if (sd.sdmode == 1) { // sd printing
-            GUI::menuSelectableP(action, PSTR("Pause SD Print"), directAction, (void*)GUI_DIRECT_ACTION_PAUSE_SD_PRINT, GUIPageType::ACTION);
-            GUI::menuSelectableP(action, PSTR("Stop SD Print"), directAction, (void*)GUI_DIRECT_ACTION_STOP_SD_PRINT, GUIPageType::ACTION);
-        } else if (sd.sdmode == 2) { // sd paused
-            GUI::menuSelectableP(action, PSTR("Continue SD Print"), directAction, (void*)GUI_DIRECT_ACTION_CONTINUE_SD_PRINT, GUIPageType::ACTION);
-            GUI::menuSelectableP(action, PSTR("Stop SD Print"), directAction, (void*)GUI_DIRECT_ACTION_STOP_SD_PRINT, GUIPageType::ACTION);
+
+    if ((Printer::isPrinting() || Printer::isMenuMode(MENU_MODE_PAUSED))) {
+        if (Printer::isMenuMode(MENU_MODE_PAUSED)) {
+            GUI::menuSelectableP(action, PSTR("Continue Print"), directAction, (void*)GUI_DIRECT_ACTION_CONTINUE_PRINT, GUIPageType::ACTION);
+        } else {
+            GUI::menuSelectableP(action, PSTR("Pause Print"), directAction, (void*)GUI_DIRECT_ACTION_PAUSE_PRINT, GUIPageType::ACTION);
         }
+        GUI::menuSelectableP(action, PSTR("Stop Print"), directAction, (void*)GUI_DIRECT_ACTION_STOP_PRINT, GUIPageType::ACTION);
+    } else {
+#if SDSUPPORT
+        if (sd.state >= SDState::SD_MOUNTED) {
+            if (sd.volumeLabel[0u] == '\0') {
+                GUI::menuSelectableP(action, PSTR("SD Print"), menuSDPrint, nullptr, GUIPageType::MENU);
+            } else {
+                GUI::flashToStringString(GUI::tmpString, PSTR("Media: @"), sd.volumeLabel);
+                GUI::menuSelectable(action, GUI::tmpString, menuSDPrint, nullptr, GUIPageType::MENU);
+            }
+        }
+#endif
     }
-#if SDCARDDETECT < 0 // Offer mount option
-    else {
+#if SDSUPPORT && SDCARDDETECT < 0 // Offer mount option
+    if (sd.state <= SDState::SD_HAS_ERROR) {
         GUI::menuSelectableP(action, PSTR("Mount SD Card"), directAction, (void*)GUI_DIRECT_ACTION_MOUNT_SD_CARD, GUIPageType::ACTION);
     }
 #endif
-#endif
+
 #undef IO_TARGET
 #define IO_TARGET IO_TARGET_GUI_MAIN_MENU
 #include "../io/redefine.h"

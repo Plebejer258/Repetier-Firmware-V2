@@ -19,13 +19,13 @@
     which based on Tonokip RepRap firmware rewrite based off of Hydra-mmm firmware.
 */
 
-#ifndef COMMUNICATION_H
-#define COMMUNICATION_H
+#pragma once
 
 #ifndef MAX_DATA_SOURCES
 #define MAX_DATA_SOURCES 4
 #endif
 
+typedef void (*PromptDialogCallback)(int selection);
 enum class BoolFormat { TRUEFALSE,
                         ONOFF,
                         YESNO };
@@ -49,6 +49,7 @@ class GCodeSource {
 
 public:
     static GCodeSource* activeSource;
+    static GCodeSource* usbHostSource;
     static void registerSource(GCodeSource* newSource);
     static void removeSource(GCodeSource* delSource);
     static void rotateSource();           ///< Move active to next source
@@ -56,11 +57,12 @@ public:
     static void prefetchAll();
     static void printAllFLN(FSTRINGPARAM(text));
     static void printAllFLN(FSTRINGPARAM(text), int32_t v);
+    static bool hasBaudSources();
     uint32_t lastLineNumber;
     uint8_t wasLastCommandReceivedAsBinary; ///< Was the last successful command in binary mode?
     millis_t timeOfLastDataPacket;
     int8_t waitingForResend; ///< Waiting for line to be resend. -1 = no wait.
-
+    bool outOfOrder;         ///< True if out of order execution is allowed
     GCodeSource();
     virtual ~GCodeSource() { }
     virtual bool isOpen() = 0;
@@ -148,6 +150,7 @@ public:
     FSTRINGVAR(tBtnOK)
     FSTRINGVAR(tM999)
     FSTRINGVAR(tTestM999)
+    FSTRINGVAR(tColdExtrusionPrevented)
     // Units
     FSTRINGVAR(tUnitMM)
     FSTRINGVAR(tUnitMMPS)
@@ -163,6 +166,14 @@ public:
     FSTRINGVAR(tUnitMilliWatt)
     FSTRINGVAR(tUnitPWM)
     FSTRINGVAR(tUnitRPM)
+    FSTRINGVAR(tMatPLA)
+    FSTRINGVAR(tMatPET)
+    FSTRINGVAR(tMatASA)
+    FSTRINGVAR(tMatPC)
+    FSTRINGVAR(tMatABS)
+    FSTRINGVAR(tMatHIPS)
+    FSTRINGVAR(tMatPP)
+    FSTRINGVAR(tMatFLEX)
     FSTRINGVAR(tJSONDir)
     FSTRINGVAR(tJSONFiles)
     FSTRINGVAR(tJSONArrayEnd)
@@ -321,6 +332,7 @@ public:
 #ifdef DEBUG_STEPCOUNT
     FSTRINGVAR(tDBGMissedSteps)
 #endif
+    FSTRINGVAR(tProbing)
     FSTRINGVAR(tZProbe)
     FSTRINGVAR(tZProbeStartScript)
     FSTRINGVAR(tZProbeEndScript)
@@ -337,6 +349,7 @@ public:
     FSTRINGVAR(tErrorImportBump)
     FSTRINGVAR(tErrorExportBump)
     FSTRINGVAR(tNoGridLeveling)
+    FSTRINGVAR(tNoDistortionData)
     FSTRINGVAR(tTransformationMatrix)
     FSTRINGVAR(tZProbeFailed)
     FSTRINGVAR(tZProbeMax)
@@ -431,7 +444,10 @@ public:
     FSTRINGVAR(tEPRAdvanceL)
     FSTRINGVAR(tEPRPreheatTemp)
     FSTRINGVAR(tEPRPreheatBedTemp)
-    FSTRINGVAR(tEPRTonesEnabled)
+    FSTRINGVAR(tEPRToneVolume)
+
+
+    // SDCARD RELATED
     //FSTRINGVAR(tSDRemoved)
     //FSTRINGVAR(tSDInserted)
     FSTRINGVAR(tSDInitFail)
@@ -442,8 +458,12 @@ public:
     FSTRINGVAR(tSpaceSizeColon)
     FSTRINGVAR(tFileSelected)
     FSTRINGVAR(tFileOpenFailed)
+    FSTRINGVAR(tInvalidFiletype)
+    FSTRINGVAR(tInvalidFilename)
+    FSTRINGVAR(tNoMountedCard)
     FSTRINGVAR(tSDPrintingByte)
     FSTRINGVAR(tNotSDPrinting)
+    FSTRINGVAR(tCurrentOpenFile)
     FSTRINGVAR(tOpenFailedFile)
     FSTRINGVAR(tWritingToFile)
     FSTRINGVAR(tDoneSavingFile)
@@ -452,25 +472,24 @@ public:
     FSTRINGVAR(tDirectoryCreated)
     FSTRINGVAR(tCreationFailed)
     FSTRINGVAR(tSDErrorCode)
+    // END SDCARD RELATED
+
+
     FSTRINGVAR(tHeaterDecoupled)
     FSTRINGVAR(tHeaterDecoupledWarning)
 #if FEATURE_RETRACTION
     FSTRINGVAR(tEPRAutoretractEnabled)
     FSTRINGVAR(tEPRRetractionLength)
-    FSTRINGVAR(tEPRRetractionLongLength)
     FSTRINGVAR(tEPRRetractionSpeed)
     FSTRINGVAR(tEPRRetractionZLift)
     FSTRINGVAR(tEPRRetractionUndoExtraLength)
+    FSTRINGVAR(tEPRRetractionLongLength)
     FSTRINGVAR(tEPRRetractionUndoExtraLongLength)
     FSTRINGVAR(tEPRRetractionUndoSpeed)
 #endif
     FSTRINGVAR(tConfig)
     FSTRINGVAR(tExtrDot)
 
-#if STEPPER_CURRENT_CONTROL == CURRENT_CONTROL_MCP4728
-    FSTRINGVAR(tMCPEpromSettings)
-    FSTRINGVAR(tMCPCurrentSettings)
-#endif
     FSTRINGVAR(tPrinterModeFFF)
     FSTRINGVAR(tPrinterModeLaser)
     FSTRINGVAR(tPrinterModeCNC)
@@ -485,6 +504,7 @@ public:
     FSTRINGVAR(tMotorResolutionSteps)
     FSTRINGVAR(tMotorMicrosteps)
     FSTRINGVAR(tMotorRMSCurrentMA)
+    FSTRINGVAR(tMotorRMSCurrentMAColon)
     FSTRINGVAR(tMotorHybridTresholdMMS)
     FSTRINGVAR(tMotorStealthOnOff)
     FSTRINGVAR(tMotorStallSensitivity255)
@@ -517,6 +537,7 @@ public:
     FSTRINGVAR(tMotorTBLColon)
     FSTRINGVAR(tMotorIOIN)
     FSTRINGVAR(tMotorGSTAT)
+    FSTRINGVAR(tMotorDriverShort)
     FSTRINGVAR(tMotorDriverOvertempCurrent)
     FSTRINGVAR(tMotorDriverOvertempWarningCurrent)
     FSTRINGVAR(tMotorCurrentDecreasedTo)
@@ -526,6 +547,7 @@ public:
     FSTRINGVAR(tMotorSpaceHybridTresholdColor)
     FSTRINGVAR(tMotorSpaceStallguardSensitivityColon)
     FSTRINGVAR(tMotorStallguardResult)
+    FSTRINGVAR(tMotorSpaceRMSCurrentMAColon)
 
     static void cap(FSTRINGPARAM(text));
     static void config(FSTRINGPARAM(text));
@@ -571,6 +593,17 @@ public:
         GCodeSource::writeToAll('\r');
         GCodeSource::writeToAll('\n');
     }
+    static void promptStart(PromptDialogCallback cb, FSTRINGPARAM(text), bool blocking = true);
+    static void promptStart(PromptDialogCallback cb, char* text, bool blocking = true);
+    static void promptStart(PromptDialogCallback cb, FSTRINGPARAM(prefix), FSTRINGPARAM(text), bool blocking = true);
+    static void promptStart(PromptDialogCallback cb, FSTRINGPARAM(prefix), char* text, bool blocking = true);
+    static void promptEnd(bool blocking = true);
+    static void promptButton(FSTRINGPARAM(text));
+    static void promptShow();
+
+    template <typename T>
+    static void printBinaryFLN(FSTRINGPARAM(text), T n, bool grouping = false);
+
     static bool writeToAll;
 #if FEATURE_CONTROLLER != NO_CONTROLLER
     static const char* translatedF(int textId);
@@ -580,6 +613,19 @@ public:
 protected:
 private:
 };
+
+template <typename T>
+void Com::printBinaryFLN(FSTRINGPARAM(text), T n, bool grouping) {
+    printF(text);
+    size_t i = (sizeof(n) * 8u) - 1u;
+    do {
+        print(((1u << i) & n) ? '1' : '0');
+        if (grouping && i && !(i % 8u)) {
+            print(' ');
+        }
+    } while (i--);
+    println();
+}
 
 #ifdef DEBUG
 #define SHOW(x) \
@@ -626,5 +672,3 @@ private:
 #define SHOWA(t, a, n)
 #define SHOWAM(t, a, n)
 #endif
-
-#endif // COMMUNICATION_H

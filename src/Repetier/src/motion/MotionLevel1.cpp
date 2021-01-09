@@ -32,6 +32,8 @@ float Motion1::homingFeedrate[NUM_AXES];
 float Motion1::moveFeedrate[NUM_AXES];
 float Motion1::maxAcceleration[NUM_AXES];
 float Motion1::maxTravelAcceleration[NUM_AXES];
+float Motion1::maxAccelerationEEPROM[NUM_AXES];
+float Motion1::maxTravelAccelerationEEPROM[NUM_AXES];
 float Motion1::resolution[NUM_AXES];
 float Motion1::minPos[NUM_AXES];
 float Motion1::maxPos[NUM_AXES];
@@ -72,8 +74,20 @@ fast8_t Motion1::dittoMode = 0;   // copy extrusion signals
 fast8_t Motion1::dittoMirror = 0; // mirror for dual x printer
 fast8_t Motion1::alwaysCheckEndstops;
 bool Motion1::autolevelActive = false;
+float Motion1::totalBabystepZ = 0.0f; // Sum since homing for z helper functions
 #if FEATURE_AXISCOMP
 float Motion1::axisCompTanXY, Motion1::axisCompTanXZ, Motion1::axisCompTanYZ;
+#endif
+
+#if FEATURE_RETRACTION
+bool Motion1::retracted;
+float Motion1::retractLength;
+float Motion1::retractLongLength;
+float Motion1::retractSpeed;
+float Motion1::retractZLift;
+float Motion1::retractUndoSpeed;
+float Motion1::retractUndoExtraLength;
+float Motion1::retractUndoExtraLongLength;
 #endif
 
 volatile fast8_t Motion1::last;    /// newest entry
@@ -147,15 +161,15 @@ void Motion1::setFromConfig() {
     moveFeedrate[Z_AXIS] = Z_SPEED;
     moveFeedrate[E_AXIS] = E_SPEED;
 
-    maxAcceleration[X_AXIS] = MAX_ACCELERATION_UNITS_PER_SQ_SECOND_X;
-    maxAcceleration[Y_AXIS] = MAX_ACCELERATION_UNITS_PER_SQ_SECOND_Y;
-    maxAcceleration[Z_AXIS] = MAX_ACCELERATION_UNITS_PER_SQ_SECOND_Z;
-    maxAcceleration[E_AXIS] = 1000;
+    maxAcceleration[X_AXIS] = maxAccelerationEEPROM[X_AXIS] = MAX_ACCELERATION_UNITS_PER_SQ_SECOND_X;
+    maxAcceleration[Y_AXIS] = maxAccelerationEEPROM[Y_AXIS] = MAX_ACCELERATION_UNITS_PER_SQ_SECOND_Y;
+    maxAcceleration[Z_AXIS] = maxAccelerationEEPROM[Z_AXIS] = MAX_ACCELERATION_UNITS_PER_SQ_SECOND_Z;
+    maxAcceleration[E_AXIS] = maxAccelerationEEPROM[E_AXIS] = 1000;
 
-    maxTravelAcceleration[X_AXIS] = MAX_TRAVEL_ACCELERATION_UNITS_PER_SQ_SECOND_X;
-    maxTravelAcceleration[Y_AXIS] = MAX_TRAVEL_ACCELERATION_UNITS_PER_SQ_SECOND_Y;
-    maxTravelAcceleration[Z_AXIS] = MAX_TRAVEL_ACCELERATION_UNITS_PER_SQ_SECOND_Z;
-    maxTravelAcceleration[E_AXIS] = 1000;
+    maxTravelAcceleration[X_AXIS] = maxTravelAccelerationEEPROM[X_AXIS] = MAX_TRAVEL_ACCELERATION_UNITS_PER_SQ_SECOND_X;
+    maxTravelAcceleration[Y_AXIS] = maxTravelAccelerationEEPROM[Y_AXIS] = MAX_TRAVEL_ACCELERATION_UNITS_PER_SQ_SECOND_Y;
+    maxTravelAcceleration[Z_AXIS] = maxTravelAccelerationEEPROM[Z_AXIS] = MAX_TRAVEL_ACCELERATION_UNITS_PER_SQ_SECOND_Z;
+    maxTravelAcceleration[E_AXIS] = maxTravelAccelerationEEPROM[E_AXIS] = 1000;
 
     homeRetestDistance[X_AXIS] = ENDSTOP_X_BACK_MOVE;
     homeRetestDistance[Y_AXIS] = ENDSTOP_Y_BACK_MOVE;
@@ -217,8 +231,8 @@ void Motion1::setFromConfig() {
     maxFeedrate[A_AXIS] = MAX_FEEDRATE_A;
     homingFeedrate[A_AXIS] = HOMING_FEEDRATE_A;
     moveFeedrate[A_AXIS] = A_SPEED;
-    maxAcceleration[A_AXIS] = MAX_ACCELERATION_UNITS_PER_SQ_SECOND_A;
-    maxTravelAcceleration[A_AXIS] = MAX_TRAVEL_ACCELERATION_UNITS_PER_SQ_SECOND_A;
+    maxAcceleration[A_AXIS] = maxAccelerationEEPROM[A_AXIS] = MAX_ACCELERATION_UNITS_PER_SQ_SECOND_A;
+    maxTravelAcceleration[A_AXIS] = maxTravelAccelerationEEPROM[A_AXIS] = MAX_TRAVEL_ACCELERATION_UNITS_PER_SQ_SECOND_A;
     homeRetestDistance[A_AXIS] = ENDSTOP_A_BACK_MOVE;
     homeRetestReduction[A_AXIS] = ENDSTOP_A_RETEST_REDUCTION_FACTOR;
     homeEndstopDistance[A_AXIS] = ENDSTOP_A_BACK_ON_HOME;
@@ -236,8 +250,8 @@ void Motion1::setFromConfig() {
     maxFeedrate[B_AXIS] = MAX_FEEDRATE_B;
     homingFeedrate[B_AXIS] = HOMING_FEEDRATE_B;
     moveFeedrate[A_AXIS] = B_SPEED;
-    maxAcceleration[B_AXIS] = MAX_ACCELERATION_UNITS_PER_SQ_SECOND_B;
-    maxTravelAcceleration[B_AXIS] = MAX_TRAVEL_ACCELERATION_UNITS_PER_SQ_SECOND_B;
+    maxAcceleration[B_AXIS] = maxAccelerationEEPROM[B_AXIS] = MAX_ACCELERATION_UNITS_PER_SQ_SECOND_B;
+    maxTravelAcceleration[B_AXIS] = maxTravelAccelerationEEPROM[B_AXIS] = MAX_TRAVEL_ACCELERATION_UNITS_PER_SQ_SECOND_B;
     homeRetestDistance[B_AXIS] = ENDSTOP_B_BACK_MOVE;
     homeRetestReduction[B_AXIS] = ENDSTOP_B_RETEST_REDUCTION_FACTOR;
     homeEndstopDistance[B_AXIS] = ENDSTOP_B_BACK_ON_HOME;
@@ -255,8 +269,8 @@ void Motion1::setFromConfig() {
     maxFeedrate[C_AXIS] = MAX_FEEDRATE_C;
     homingFeedrate[C_AXIS] = HOMING_FEEDRATE_C;
     moveFeedrate[C_AXIS] = C_SPEED;
-    maxAcceleration[C_AXIS] = MAX_ACCELERATION_UNITS_PER_SQ_SECOND_C;
-    maxTravelAcceleration[C_AXIS] = MAX_TRAVEL_ACCELERATION_UNITS_PER_SQ_SECOND_C;
+    maxAcceleration[C_AXIS] = maxAccelerationEEPROM[C_AXIS] = MAX_ACCELERATION_UNITS_PER_SQ_SECOND_C;
+    maxTravelAcceleration[C_AXIS] = maxTravelAccelerationEEPROM[C_AXIS] = MAX_TRAVEL_ACCELERATION_UNITS_PER_SQ_SECOND_C;
     homeRetestDistance[C_AXIS] = ENDSTOP_C_BACK_MOVE;
     homeRetestReduction[C_AXIS] = ENDSTOP_C_RETEST_REDUCTION_FACTOR;
     homeEndstopDistance[C_AXIS] = ENDSTOP_C_BACK_ON_HOME;
@@ -273,6 +287,17 @@ void Motion1::setFromConfig() {
     axisCompTanXY = AXISCOMP_TANXY;
     axisCompTanXZ = AXISCOMP_TANXZ;
     axisCompTanYZ = AXISCOMP_TANYZ;
+#endif
+
+#if FEATURE_RETRACTION
+    Printer::setAutoretract(AUTORETRACT_ENABLED, true);
+    retractLength = RETRACTION_LENGTH;
+    retractLongLength = RETRACTION_LONG_LENGTH;
+    retractSpeed = RETRACTION_SPEED;
+    retractZLift = RETRACTION_Z_LIFT;
+    retractUndoSpeed = RETRACTION_UNDO_SPEED;
+    retractUndoExtraLength = RETRACTION_UNDO_EXTRA_LENGTH;
+    retractUndoExtraLongLength = RETRACTION_UNDO_EXTRA_LONG_LENGTH;
 #endif
 
     FOR_ALL_AXES(i) {
@@ -314,8 +339,8 @@ void Motion1::updateRotMinMax() {
     for (fast8_t i = 0; i <= Z_AXIS; i++) {
         float vMin, vMax;
         Tool::minMaxOffsetForAxis(i, vMin, vMax);
-        minPosOff[i] = minPos[i] + vMin - vMax;
-        maxPosOff[i] = maxPos[i] + vMax - vMin;
+        minPosOff[i] = minPos[i] /* + vMin */ - vMax;
+        maxPosOff[i] = maxPos[i] /* + vMax */ - vMin;
     }
     minPosOff[Z_AXIS] = 0; // we can't go below bed!
     rotMax[X_AXIS] = rotMax[Y_AXIS] = rotMax[Z_AXIS] = 0;
@@ -332,8 +357,8 @@ void Motion1::updateRotMinMax() {
     }
     // add some safety margin preventing triggering end stops.
     for (fast8_t i = 0; i <= Z_AXIS; i++) {
-        rotMax[i] *= 1.001;
-        rotMin[i] *= 1.001;
+        rotMax[i] += 0.01; // Add small epsilon to compensate rounding errors in transformations
+        rotMin[i] -= 0.01;
         minPosOff[i] += rotMin[i];
         maxPosOff[i] += rotMax[i];
     }
@@ -342,11 +367,13 @@ void Motion1::updateRotMinMax() {
         maxPosOff[i] = maxPos[i];
     }
     autolevelActive = old;
+#ifdef DEBUG_MOVES
     Com::printArrayFLN(PSTR("minPosOff:"), minPosOff, 3);
     Com::printArrayFLN(PSTR("maxPosOff:"), maxPosOff, 3);
     Com::printArrayFLN(PSTR("rotMin:"), rotMin, 3);
     Com::printArrayFLN(PSTR("rotMax:"), rotMax, 3);
     Com::printArrayFLN(PSTR("transform:"), autolevelTransformation, 9, 5);
+#endif
 }
 
 void Motion1::fillPosFromGCode(GCode& code, float pos[NUM_AXES], float fallback) {
@@ -447,12 +474,14 @@ float Motion1::getShowPosition(fast8_t axis) {
     }
     return currentPosition[axis] + g92Offsets[axis];
 }
+
 void Motion1::setMotorForAxis(StepperDriverBase* motor, fast8_t axis) {
     waitForEndOfMoves();
     motors[axis] = motor;
     if (motor != nullptr) {
         motor->setAxis(axis);
     }
+    Motion3::setDirectionsForNewMotors();
 }
 
 fast8_t Motion1::buffersUsed() {
@@ -602,6 +631,7 @@ void Motion1::setTmpPositionXYZE(float x, float y, float z, float e) {
 
 // Move with coordinates in official coordinates (before offset, transform, ...)
 bool Motion1::moveByOfficial(float coords[NUM_AXES], float feedrate, bool secondaryMove) {
+    bool movingEAxis = (coords[E_AXIS] != currentPosition[E_AXIS]);
     Printer::unparkSafety();
     FOR_ALL_AXES(i) {
         if (coords[i] != IGNORE_COORDINATE) {
@@ -616,6 +646,11 @@ bool Motion1::moveByOfficial(float coords[NUM_AXES], float feedrate, bool second
         || (tool != nullptr && tool->getHeater() != nullptr && (tool->getHeater()->getCurrentTemperature() < MIN_EXTRUDER_TEMP && !Printer::isColdExtrusionAllowed()))
 #endif
     ) { // ignore
+#if MIN_EXTRUDER_TEMP > MAX_ROOM_TEMPERATURE
+        if (movingEAxis && coords[E_AXIS] != IGNORE_COORDINATE && !Printer::debugDryrun()) {
+            Com::printWarningFLN(Com::tColdExtrusionPrevented);
+        }
+#endif
         destinationPositionTransformed[E_AXIS] = currentPositionTransformed[E_AXIS];
     }
     if (feedrate == IGNORE_COORDINATE) {
@@ -779,6 +814,7 @@ void Motion1::setToolOffset(float ox, float oy, float oz) {
 
 // Move to the printer coordinates (after offset, transform, ...)
 bool Motion1::moveByPrinter(float coords[NUM_AXES], float feedrate, bool secondaryMove) {
+    bool movingEAxis = (coords[E_AXIS] != destinationPositionTransformed[E_AXIS]);
     Printer::unparkSafety();
     FOR_ALL_AXES(i) {
         if (coords[i] == IGNORE_COORDINATE) {
@@ -793,6 +829,11 @@ bool Motion1::moveByPrinter(float coords[NUM_AXES], float feedrate, bool seconda
         || (tool != nullptr && tool->getHeater() != nullptr && (tool->getHeater()->getCurrentTemperature() < MIN_EXTRUDER_TEMP && !Printer::isColdExtrusionAllowed()))
 #endif
     ) {
+#if MIN_EXTRUDER_TEMP > MAX_ROOM_TEMPERATURE
+        if (movingEAxis && coords[E_AXIS] != IGNORE_COORDINATE && !Printer::debugDryrun()) {
+            Com::printWarningFLN(Com::tColdExtrusionPrevented);
+        }
+#endif
         currentPositionTransformed[E_AXIS] = destinationPositionTransformed[E_AXIS];
     }
     PrinterType::transformedToOfficial(destinationPositionTransformed, currentPosition);
@@ -947,13 +988,15 @@ bool Motion1::queueMove(float feedrate, bool secondaryMove) {
     buf.length = sqrtf(length2);
     buf.intLength = static_cast<int32_t>(1000.0f * buf.length);
     buf.invLength = 1.0 / buf.length;
-    /* if (Printer::debugEcho()) {
+#ifdef DEBUG_MOVES
+    if (Printer::debugEcho()) {
         Com::printF("Move CX:", currentPositionTransformed[X_AXIS]);
 #if NUM_AXES > A_AXIS
         Com::printF(" AX:", currentPositionTransformed[A_AXIS]);
 #endif
         Com::printF(" CY:", currentPositionTransformed[Y_AXIS]);
         Com::printF(" CZ:", currentPositionTransformed[Z_AXIS]);
+        Com::printF(" OX:", toolOffset[X_AXIS]);
         Com::printF(" l:", buf.length);
         Com::printFLN(" f:", feedrate);
         Com::printF("Move DX:", delta[X_AXIS]);
@@ -965,7 +1008,8 @@ bool Motion1::queueMove(float feedrate, bool secondaryMove) {
         Com::printFLN(" DZ:", delta[Z_AXIS]);
         // Com::printArrayFLN(PSTR("cpt4:"), Motion1::currentPositionTransformed, 5, 2);
         // Com::printArrayFLN(PSTR("mp:"), Motion2::lastMotorPos[Motion2::lastMotorIdx], 5);
-    } */
+    }
+#endif
     buf.action = Motion1Action::MOVE;
     if (endstopMode != EndstopMode::DISABLED) {
         buf.flags = FLAG_CHECK_ENDSTOPS;
@@ -1574,17 +1618,19 @@ void Motion1::homeAxes(fast8_t axes) {
     Printer::setHoming(true);
 #if ZHOME_PRE_RAISE
     // float zAmountRaised = 0;
-    if (ZHOME_PRE_RAISE == 2 || Motion1::minAxisEndstops[Z_AXIS]->update()) {
+    if (ZHOME_PRE_RAISE == 2
+        || (Motion1::minAxisEndstops[Z_AXIS] && Motion1::minAxisEndstops[Z_AXIS]->update())) {
         if (!isAxisHomed(Z_AXIS) || currentPosition[Z_AXIS] + ZHOME_PRE_RAISE_DISTANCE < maxPos[Z_AXIS]) {
             setTmpPositionXYZ(IGNORE_COORDINATE, IGNORE_COORDINATE, ZHOME_PRE_RAISE_DISTANCE);
             moveRelativeByOfficial(tmpPosition, homingFeedrate[Z_AXIS], false);
+            waitForEndOfMoves();
             // zAmountRaised = ZHOME_PRE_RAISE_DISTANCE;
         }
     }
 #endif
     // We measure in printer coordinates, so deactivate all corrections
     bool isAL = isAutolevelActive();
-    setAutolevelActive(false);
+    setAutolevelActive(false, true);
     bool bcActive = Leveling::isDistortionEnabled();
     Leveling::setDistortionEnabled(false);
     updatePositionsFromCurrent();
@@ -1620,7 +1666,9 @@ void Motion1::homeAxes(fast8_t axes) {
                     moveByOfficial(tmpPosition, maxFeedrate[X_AXIS], false);
 #endif
                     if (ZProbe != nullptr && homeDir[Z_AXIS] < 0) { // activate z probe
-                        ZProbeHandler::activate();
+                        if (!ZProbeHandler::activate()) {
+                            return;
+                        }
                     }
                 }
                 PrinterType::homeAxis(i);
@@ -1652,10 +1700,11 @@ void Motion1::homeAxes(fast8_t axes) {
     }
     Printer::setHomedAll(ok);
     // Reactivate corrections
-    setAutolevelActive(isAL);
+    setAutolevelActive(isAL, true);
     Leveling::setDistortionEnabled(bcActive);
 
     if (axes & axisBits[Z_AXIS]) {
+        totalBabystepZ = 0;
         Motion1::correctBumpOffset(); // activate bump offset, needs distorion enabled to have an effect!
         // Add z probe correctons
         int32_t motorPos[NUM_AXES];
@@ -1704,16 +1753,22 @@ void Motion1::homeAxes(fast8_t axes) {
     }
 #endif
 */
-    if (Tool::getActiveTool() != nullptr && ok) { // select only if all is homed or we get unwanted moves!
+#if PRINTER_TYPE == PRINTER_TYPE_DELTA
+    if (axes & axisBits[Z_AXIS]) {
+        oldCoordinates[X_AXIS] = oldCoordinates[Y_AXIS] = 0;
+    }
+#endif
+    oldCoordinates[E_AXIS] = currentPosition[E_AXIS];
+    moveByOfficial(oldCoordinates, moveFeedrate[X_AXIS], false);     // make official pos = homing pos reagrdless of transformation
+    if (Tool::getActiveTool() != nullptr && ok && (axes & 7) != 0) { // select only if all is homed or we get unwanted moves! Also only do it if position has changed allowing homing of non position axis in extruder selection.
         Tool::selectTool(activeToolId, true);
     }
-    oldCoordinates[E_AXIS] = currentPosition[E_AXIS];
-    moveByOfficial(oldCoordinates, moveFeedrate[X_AXIS], false); // make official pos = homing pos reagrdless of transformation
+
     Motion1::printCurrentPosition();
     GUI::popBusy();
 }
 
-EndstopDriver& Motion1::endstopFoxAxisDir(fast8_t axis, bool maxDir) {
+EndstopDriver& Motion1::endstopForAxisDir(fast8_t axis, bool maxDir) {
     if (maxDir) {
         switch (axis) {
         case X_AXIS:
@@ -1776,6 +1831,25 @@ EndstopDriver& Motion1::endstopFoxAxisDir(fast8_t axis, bool maxDir) {
     return endstopNone;
 }
 
+void Motion1::setHardwareEndstopsAttached(bool attach, EndstopDriver* specificDriver) {
+    attach = alwaysCheckEndstops ? true : attach;
+    if (specificDriver) {
+        specificDriver->setAttached(attach);
+    } else {
+        if (ZProbe) {
+            ZProbe->setAttached(attach);
+        }
+        FOR_ALL_AXES(i) {
+            if (Motion1::maxAxisEndstops[i]) {
+                Motion1::maxAxisEndstops[i]->setAttached(attach);
+            }
+            if (Motion1::minAxisEndstops[i]) {
+                Motion1::minAxisEndstops[i]->setAttached(attach);
+            }
+        }
+    }
+}
+
 bool Motion1::simpleHome(fast8_t axis) {
     if (homeDir[axis] == 0) { // nothing to do, just set to min
         setAxisHomed(axis, true);
@@ -1785,7 +1859,7 @@ bool Motion1::simpleHome(fast8_t axis) {
         return true;
     }
     bool ok = true;
-    EndstopDriver& eStop = endstopFoxAxisDir(axis, homeDir[axis] > 0);
+    EndstopDriver& eStop = endstopForAxisDir(axis, homeDir[axis] > 0);
     const float secureDistance = (maxPosOff[axis] - minPosOff[axis]) * 1.5f;
     const EndstopMode oldMode = endstopMode;
     const EndstopMode newMode = axis == Z_AXIS && ZProbe != nullptr && homeDir[Z_AXIS] < 0 ? EndstopMode::PROBING : EndstopMode::STOP_HIT_AXES;
@@ -1795,6 +1869,7 @@ bool Motion1::simpleHome(fast8_t axis) {
     FOR_ALL_AXES(i) {
         dest[i] = IGNORE_COORDINATE;
     }
+    setHardwareEndstopsAttached(true, &eStop);
     waitForEndOfMoves(); // defined starting condition
 
     // First test
@@ -1803,10 +1878,10 @@ bool Motion1::simpleHome(fast8_t axis) {
     if (!eStop.update()) { // don't test if we are still there
         moveRelativeByOfficial(dest, homingFeedrate[axis], false);
         waitForEndOfMoves();
-        updatePositionsFromCurrent();
-        Motion2::setMotorPositionFromTransformed();
-        HAL::delayMilliseconds(50);
     }
+    updatePositionsFromCurrent();
+    Motion2::setMotorPositionFromTransformed();
+    HAL::delayMilliseconds(50);
 
     // Move back for retest
     endstopMode = EndstopMode::DISABLED;
@@ -1833,7 +1908,7 @@ bool Motion1::simpleHome(fast8_t axis) {
     HAL::delayMilliseconds(30);
     float minOff, maxOff;
     float curPos = homeDir[axis] > 0 ? maxPos[axis] : minPos[axis];
-    Tool::minMaxOffsetForAxis(axis, minOff, maxOff);
+    Tool::minMaxOffsetForAxis(axis, minOff, maxOff);           // Offsets as defined in tool!
     dest[axis] = -homeDir[axis] * (homeEndstopDistance[axis]); // - Tool::getActiveTool()->getOffsetForAxis(axis));
     if (axis != Z_AXIS) {
         if (homeDir[axis] < 0) {
@@ -1868,6 +1943,7 @@ bool Motion1::simpleHome(fast8_t axis) {
         }
     }
     endstopMode = EndstopMode::DISABLED;
+    setHardwareEndstopsAttached(false, &eStop);
     moveRelativeByOfficial(dest, homingFeedrate[axis], false); // also adds toolOffset!
     waitForEndOfMoves();
     currentPosition[axis] = curPos;
@@ -1924,14 +2000,14 @@ PGM_P Motion1::getAxisString(fast8_t axis) {
     return Com::tXAxis; // make compiler happy
 }
 
-void Motion1::eepromHandle() {
+void Motion1::eepromHandle(bool firstImport) {
     int p = 0;
     FOR_ALL_AXES(i) {
         if (i == E_AXIS) {
             continue;
         }
         EEPROM::handlePrefix(getAxisString(i));
-        EEPROM::handleFloat(eprStart + p + EPR_M1_RESOLUTION, PSTR("steps per mm"), 3, resolution[i]);
+        EEPROM::handleFloat(eprStart + p + EPR_M1_RESOLUTION, Com::tEPRStepsPerMM, 3, resolution[i]);
 #if PRINTER_TYPE == PRINTER_TYPE_DUAL_X
         if (i != A_AXIS) {
 #endif
@@ -1939,8 +2015,8 @@ void Motion1::eepromHandle() {
             if (i != X_AXIS && i != Y_AXIS) {
 #endif
                 EEPROM::handleFloat(eprStart + p + EPR_M1_MAX_FEEDRATE, PSTR("max. feedrate [mm/s]"), 3, maxFeedrate[i]);
-                EEPROM::handleFloat(eprStart + p + EPR_M1_MAX_ACCELERATION, PSTR("max. print acceleration [mm/s^2]"), 3, maxAcceleration[i]);
-                EEPROM::handleFloat(eprStart + p + EPR_M1_MAX_TRAVEL_ACCELERATION, PSTR("max. travel acceleration [mm/s^2]"), 3, maxTravelAcceleration[i]);
+                EEPROM::handleFloat(eprStart + p + EPR_M1_MAX_ACCELERATION, PSTR("max. print acceleration [mm/s^2]"), 3, maxAccelerationEEPROM[i]);
+                EEPROM::handleFloat(eprStart + p + EPR_M1_MAX_TRAVEL_ACCELERATION, PSTR("max. travel acceleration [mm/s^2]"), 3, maxTravelAccelerationEEPROM[i]);
                 EEPROM::handleFloat(eprStart + p + EPR_M1_HOMING_FEEDRATE, PSTR("homing feedrate [mm/s]"), 3, homingFeedrate[i]);
                 EEPROM::handleFloat(eprStart + p + EPR_M1_MOVE_FEEDRATE, PSTR("move feedrate [mm/s]"), 3, moveFeedrate[i]);
                 EEPROM::handleFloat(eprStart + p + EPR_M1_MAX_YANK, PSTR("max. yank(jerk) [mm/s]"), 3, maxYank[i]);
@@ -1964,19 +2040,45 @@ void Motion1::eepromHandle() {
 #if PRINTER_TYPE != PRINTER_TYPE_DUAL_X
     EEPROM::handleFloat(eprStart + EPR_M1_PARK_Z, PSTR("Park position Z raise [mm]"), 2, parkPosition[Z_AXIS]);
 #endif
-    EEPROM::handleByte(eprStart + EPR_M1_ALWAYS_CHECK_ENDSTOPS, PSTR("Always check endstops"), alwaysCheckEndstops);
+    EEPROM::handleByte(eprStart + EPR_M1_ALWAYS_CHECK_ENDSTOPS, PSTR("Always check endstops [0/1]"), alwaysCheckEndstops);
+    Motion1::setHardwareEndstopsAttached((alwaysCheckEndstops || Printer::isHoming() || Printer::isZProbingActive())); // Probing/homing checks just in case.
     EEPROM::handleByte(eprStart + EPR_M1_VELOCITY_PROFILE, PSTR("Velocity Profile [0-2]"), Motion2::velocityProfileIndex);
-    EEPROM::handleByte(eprStart + EPR_M1_AUTOLEVEL, PSTR("Auto level active [0-1]"), Motion1::autolevelActive);
+    EEPROM::handleByte(eprStart + EPR_M1_AUTOLEVEL, PSTR("Auto level active [0/1]"), Motion1::autolevelActive);
 
 #if FEATURE_AXISCOMP
     EEPROM::handleFloat(eprStart + EPR_M1_AXIS_COMP_XY, Com::tAxisCompTanXY, 6, axisCompTanXY);
     EEPROM::handleFloat(eprStart + EPR_M1_AXIS_COMP_XZ, Com::tAxisCompTanYZ, 6, axisCompTanYZ);
     EEPROM::handleFloat(eprStart + EPR_M1_AXIS_COMP_YZ, Com::tAxisCompTanXZ, 6, axisCompTanXZ);
 #endif
+
+#if FEATURE_RETRACTION
+
+    bool autoRetract = Printer::isAutoretract();
+    EEPROM::handleByte(eprStart + EPR_M1_AUTORETRACT, Com::tEPRAutoretractEnabled, autoRetract);
+    Printer::setAutoretract(autoRetract, true);
+
+    EEPROM::handleFloat(eprStart + EPR_M1_RETRACT_LENGTH, Com::tEPRRetractionLength, 2, retractLength);
+    EEPROM::handleFloat(eprStart + EPR_M1_RETRACT_SPEED, Com::tEPRRetractionSpeed, 2, retractSpeed);
+    EEPROM::handleFloat(eprStart + EPR_M1_RETRACT_ZLIFT, Com::tEPRRetractionZLift, 2, retractZLift);
+    EEPROM::handleFloat(eprStart + EPR_M1_RETRACT_UNDO_SPEED, Com::tEPRRetractionUndoSpeed, 2, retractUndoSpeed);
+    EEPROM::handleFloat(eprStart + EPR_M1_RETRACT_UNDO_EXTRA_LENGTH, Com::tEPRRetractionUndoExtraLength, 2, retractUndoExtraLength);
+
+    EEPROM::setSilent(NUM_TOOLS < 2);
+    EEPROM::handleFloat(eprStart + EPR_M1_RETRACT_UNDO_EXTRA_LONG_LENGTH, Com::tEPRRetractionUndoExtraLongLength, 2, retractUndoExtraLongLength);
+    EEPROM::handleFloat(eprStart + EPR_M1_RETRACT_LONG_LENGTH, Com::tEPRRetractionLongLength, 2, retractLongLength);
+    EEPROM::setSilent(0);
+#endif
+
     // Rotation matrix is only read/written but not shown
-    if (EEPROM::mode != 0) {
+    if (EEPROM::mode != EEPROMMode::REPORT) {
         for (fast8_t i = 0; i < 9; i++) {
             EEPROM::handleFloat(eprStart + EPR_M1_AUTOLEVEL_MATRIX + 4 * i, nullptr, 6, autolevelTransformation[i]);
+        }
+    }
+    if (firstImport) {
+        FOR_ALL_AXES(i) {
+            maxAcceleration[i] = maxAccelerationEEPROM[i];
+            maxTravelAcceleration[i] = maxTravelAccelerationEEPROM[i];
         }
     }
 }

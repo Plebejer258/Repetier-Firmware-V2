@@ -34,6 +34,10 @@
 #define EMERGENCY_PARSER 1
 #endif
 
+#ifndef HOST_PRIORITY_CONTROLS
+#define HOST_PRIORITY_CONTROLS EMERGENCY_PARSER
+#endif
+
 #include "utilities/constants.h"
 
 // Some helper macros
@@ -172,7 +176,6 @@ usage or for searching for memory induced errors. Switch it off for production, 
 #define ANALOG_REF ANALOG_REF_AVCC
 
 #include "utilities/RMath.h"
-#include "utilities/RVector3.h"
 extern void updateEndstops();
 
 // we can not prevent this as some configurations need a parameter and others not
@@ -196,19 +199,49 @@ extern void updateEndstops();
 #define EEPROM_SDCARD 3        /** Use mounted sd card as eeprom replacement */
 #define EEPROM_FLASH 4         /** Use flash memory as eeprom replacement */
 
+class GCode;
 class ServoInterface {
 public:
-    virtual int getPosition();
-    virtual void setPosition(int pos, int32_t timeout);
-    virtual void enable();
-    virtual void disable();
+    virtual int getPosition() = 0;
+    virtual void setPosition(int pos, int32_t timeout) = 0;
+    virtual void enable() = 0;
+    virtual void disable() = 0;
+    virtual void executeGCode(GCode* com) = 0;
 };
+
+enum class BootReason {
+    SOFTWARE_RESET = 0,
+    BROWNOUT = 1,
+    LOW_POWER = 2,
+    WATCHDOG_RESET = 3,
+    EXTERNAL_PIN = 4,
+    POWER_UP = 5,
+    UNKNOWN = -1
+};
+
+#define DEFAULT_MATERIAL(name, extr, bed, chamber) showTemperature(action, name, extr, bed, chamber);
 
 #include "io/temperature_tables.h"
 #include "Configuration.h"
 
 #if NUM_AXES < 4
 #error The minimum NUM_AXES allowed is 4!
+#endif
+
+#ifndef DEFAULT_MATERIALS
+#define DEFAULT_MATERIALS \
+    DEFAULT_MATERIAL(Com::tMatPLA, 215, 60, 0) \
+    DEFAULT_MATERIAL(Com::tMatPET, 230, 55, 0) \
+    DEFAULT_MATERIAL(Com::tMatASA, 260, 105, 0) \
+    DEFAULT_MATERIAL(Com::tMatPC, 275, 110, 0) \
+    DEFAULT_MATERIAL(Com::tMatABS, 255, 100, 0) \
+    DEFAULT_MATERIAL(Com::tMatHIPS, 220, 100, 0) \
+    DEFAULT_MATERIAL(Com::tMatPP, 254, 100, 0) \
+    DEFAULT_MATERIAL(Com::tMatFLEX, 240, 50, 0)
+#endif
+
+#ifndef ALWAYS_CHECK_ENDSTOPS
+#define ALWAYS_CHECK_ENDSTOPS 0
 #endif
 
 #ifndef WAITING_IDENTIFIER
@@ -333,6 +366,14 @@ public:
 #define STORE_MOTOR_STALL_SENSITIVITY 1
 #endif
 
+#ifndef DEFAULT_TONE_VOLUME
+#define DEFAULT_TONE_VOLUME 100
+#endif
+
+#ifndef MINIMUM_TONE_VOLUME
+#define MINIMUM_TONE_VOLUME 5
+#endif
+
 #ifndef NUM_BEEPERS
 #define NUM_BEEPERS 0
 #define BEEPER_LIST \
@@ -371,6 +412,14 @@ extern ServoInterface* servos[];
 #define Z_PROBE_PAUSE_HEATERS 0
 #endif
 
+#ifndef Z_PROBE_PAUSE_BED_REHEAT_TEMP
+#define Z_PROBE_PAUSE_BED_REHEAT_TEMP 5
+#endif
+
+#ifndef Z_PROBE_BLTOUCH_DEPLOY_DELAY
+#define Z_PROBE_BLTOUCH_DEPLOY_DELAY 1000
+#endif
+
 #ifndef MAX_ROOM_TEMPERATURE
 #define MAX_ROOM_TEMPERATURE 25
 #endif
@@ -380,20 +429,6 @@ extern ServoInterface* servos[];
 #ifndef ZHOME_Y_POS
 #define ZHOME_Y_POS IGNORE_COORDINATE
 #endif
-
-// MS1 MS2 Stepper Driver Micro stepping mode table
-#define MICROSTEP1 LOW, LOW
-#define MICROSTEP2 HIGH, LOW
-#define MICROSTEP4 LOW, HIGH
-#define MICROSTEP8 HIGH, HIGH
-#if (MOTHERBOARD == 501) || MOTHERBOARD == 502
-#define MICROSTEP16 LOW, LOW
-#else
-#define MICROSTEP16 HIGH, HIGH
-#endif
-#define MICROSTEP32 HIGH, HIGH
-
-#define GCODE_BUFFER_SIZE 1
 
 #if !defined(Z_PROBE_REPETITIONS) || Z_PROBE_REPETITIONS < 1
 #define Z_PROBE_SWITCHING_DISTANCE 0.5 // Distance to safely untrigger probe
@@ -415,8 +450,31 @@ extern ServoInterface* servos[];
 #else
 #define EXTRUDER_JAM_CONTROL 0
 #endif
-#ifndef JAM_METHOD
-#define JAM_METHOD 1
+
+// Firmware retraction settings
+#ifndef AUTORETRACT_ENABLED
+#define AUTORETRACT_ENABLED 0
+#endif
+#ifndef RETRACTION_LENGTH
+#define RETRACTION_LENGTH 0.0
+#endif
+#ifndef RETRACTION_SPEED
+#define RETRACTION_SPEED 0
+#endif
+#ifndef RETRACTION_UNDO_SPEED
+#define RETRACTION_UNDO_SPEED 0
+#endif
+#ifndef RETRACTION_Z_LIFT
+#define RETRACTION_Z_LIFT 0.0
+#endif
+#ifndef RETRACTION_UNDO_EXTRA_LENGTH
+#define RETRACTION_UNDO_EXTRA_LENGTH 0.0
+#endif
+#ifndef RETRACTION_UNDO_EXTRA_LONG_LENGTH
+#define RETRACTION_UNDO_EXTRA_LONG_LENGTH 0.0
+#endif
+#ifndef RETRACTION_LONG_LENGTH
+#define RETRACTION_LONG_LENGTH 0.0
 #endif
 
 #ifndef DEBUG_FREE_MEMORY
@@ -428,38 +486,6 @@ extern ServoInterface* servos[];
 #ifndef KEEP_ALIVE_INTERVAL
 #define KEEP_ALIVE_INTERVAL 2000
 #endif
-
-#ifndef MAX_VFAT_ENTRIES
-#ifdef AVR_BOARD
-#define MAX_VFAT_ENTRIES (2)
-#else
-#define MAX_VFAT_ENTRIES (3)
-#endif
-#endif
-
-/** Total size of the buffer used to store the long filenames */
-#define LONG_FILENAME_LENGTH (13 * MAX_VFAT_ENTRIES + 1)
-#define SD_MAX_FOLDER_DEPTH 2
-
-#if UI_DISPLAY_TYPE != DISPLAY_U8G
-#if (defined(USER_KEY1_PIN) && (USER_KEY1_PIN == UI_DISPLAY_D5_PIN || USER_KEY1_PIN == UI_DISPLAY_D6_PIN || USER_KEY1_PIN == UI_DISPLAY_D7_PIN)) || (defined(USER_KEY2_PIN) && (USER_KEY2_PIN == UI_DISPLAY_D5_PIN || USER_KEY2_PIN == UI_DISPLAY_D6_PIN || USER_KEY2_PIN == UI_DISPLAY_D7_PIN)) || (defined(USER_KEY3_PIN) && (USER_KEY3_PIN == UI_DISPLAY_D5_PIN || USER_KEY3_PIN == UI_DISPLAY_D6_PIN || USER_KEY3_PIN == UI_DISPLAY_D7_PIN)) || (defined(USER_KEY4_PIN) && (USER_KEY4_PIN == UI_DISPLAY_D5_PIN || USER_KEY4_PIN == UI_DISPLAY_D6_PIN || USER_KEY4_PIN == UI_DISPLAY_D7_PIN))
-#error You cannot use DISPLAY_D5_PIN, DISPLAY_D6_PIN or DISPLAY_D7_PIN for "User Keys" with character LCD display
-#endif
-#endif
-
-#ifndef SDCARDDETECT
-#define SDCARDDETECT -1
-#endif
-
-#ifndef SDSUPPORT
-#define SDSUPPORT 0
-#endif
-
-#if SDSUPPORT
-#include "SdFat/SdFat.h"
-#endif
-
-#include "communication/gcode.h"
 
 #undef min
 #undef max
@@ -526,73 +552,140 @@ extern char fullName[LONG_FILENAME_LENGTH * SD_MAX_FOLDER_DEPTH + SD_MAX_FOLDER_
 #if SDSUPPORT
 #define SHORT_FILENAME_LENGTH 14
 
-/* enum LsAction { LS_SerialPrint,
-                LS_Count,
-                LS_GetFilename }; */
+typedef SdFat sd_fsys_t;
+typedef SdBaseFile sd_file_t;
+
+enum class SDState {
+    SD_UNMOUNTED,    // No SD Card detected/mounted
+    SD_SAFE_EJECTED, // Manually ejected by M22
+    SD_HAS_ERROR,    // Rare, when has error but left SD card in.
+    SD_MOUNTED,      // When not printing/idle
+    SD_PRINTING,     // While printing. Includes while paused.
+    SD_WRITING       // While writing to a file. 5 minute timeout from last write.
+};
 class SDCard {
 public:
-#if ENABLE_SOFTWARE_SPI_CLASS
-    SdFatSoftSpi<SD_SOFT_MISO_PIN, SD_SOFT_MOSI_PIN, SD_SOFT_SCK_PIN> fat;
-#else
-    SdFat fat;
-#endif
-    //Sd2Card card; // ~14 Byte
-    //SdVolume volume;
-    //SdFile root;
-    //SdFile dir[SD_MAX_FOLDER_DEPTH+1];
-    SdFile file;
-#if JSON_OUTPUT
-    GCodeFileInfo fileInfo;
-#endif
-    uint32_t filesize;
-    uint32_t sdpos;
-    //char fullName[13*SD_MAX_FOLDER_DEPTH+13]; // Fill name
-    // char* shortname; // Pointer to start of filename itself
-    // char* pathend;   // File to char where pathname in fullname ends
-    uint8_t sdmode; // 1 if we are printing from sd card, 2 = stop accepting new commands
-    bool sdactive;
-    //int16_t n;
-    bool savetosd;
-    SdBaseFile parentFound;
-
     SDCard();
-    void initsd();
     void writeCommand(GCode* code);
-    bool selectFile(const char* filename, bool silent = false);
-    void mount();
-    void unmount();
     void startPrint();
-    void pausePrint(bool intern = false);
-    void pausePrintPart2();
-    void continuePrint(bool intern = false);
-    void stopPrint();
-    void stopPrintPart2();
+    void continuePrint(const bool internal = false);
+
+    void pausePrint(const bool internal = false);
+    void printFullyPaused();
+
+    void stopPrint(const bool silent = false);
+    void printFullyStopped();
+
+    static bool validGCodeExtension(const char* filename);
     inline void setIndex(uint32_t newpos) {
-        if (!sdactive)
+        if (state < SDState::SD_MOUNTED || !selectedFile.isOpen()) {
             return;
-        sdpos = newpos;
-        file.seekSet(sdpos);
+        }
+        selectedFilePos = newpos;
+        selectedFile.seekSet(selectedFilePos);
     }
-    void printStatus();
-    void ls();
+    void printStatus(const bool getFilename = false);
 #if JSON_OUTPUT
     void lsJSON(const char* filename);
     void JSONFileInfo(const char* filename);
     static void printEscapeChars(const char* s);
 #endif
-    void startWrite(char* filename);
-    void deleteFile(char* filename);
-    void finishWrite();
-    char* createFilename(char* buffer, const dir_t& p);
-    void makeDirectory(char* filename);
-    bool showFilename(const uint8_t* name);
+    void ls(const char* lsDir = Com::tSlash, const bool json = false);
+    void ls(sd_file_t& rootDir, const bool json = false); // Will auto close rootdir
+
+    void mount(const bool manual);
+    void unmount(const bool manual);
     void automount();
+
+    bool selectFile(const char* filename, const bool silent = false);
+    void startWrite(const char* filename);
+    void deleteFile(const char* filename);
+    void makeDirectory(const char* filename);
+    void finishWrite();
+    void finishPrint();
+
+    void printCardStats();
+    bool printIfCardErrCode(); // Just prints a small hex errorcode for the lookup table
+    bool getCardInfo(char* volumeLabelBuf = nullptr, uint8_t volumeLabelSize = 0, uint64_t* volumeSizeSectors = nullptr, uint64_t* usageBytes = nullptr, uint16_t* fileCount = nullptr, uint8_t* folderCount = nullptr);
+
+    template <typename T>
+    bool doForDirectory(sd_file_t& dir, T&& action, const bool recursive = false, size_t depth = 0) {
+        if (!dir.isDir()) {
+            return false;
+        }
+        sd_file_t file;
+        dir.rewind();
+        while (file.openNext(&dir)) {
+            if (!action(file, dir, depth)) {
+                file.close();
+                return false;
+            }
+            if (recursive && file.isDir() && (depth + 1u) < SD_MAX_FOLDER_DEPTH) {
+                depth++;
+                if (!doForDirectory(file, action, recursive, depth)) {
+                    file.close();
+                    return false;
+                }
+                depth--;
+            }
+            file.close();
+            HAL::pingWatchdog();
+        }
+        return true;
+    }
+    // Shorter than writing getname(templongfilename, sizeof(templongfilename)) etc
+    // Will always inline return pointer to either tempLongFilename or the input buffer.
+    template <size_t N>
+    inline char* getFN(sd_file_t* file, char (&buf)[N]) {
+        file->getName(buf, N);
+        return buf;
+    }
+    template <size_t N>
+    inline char* getFN(sd_file_t& file, char (&buf)[N]) {
+        file.getName(buf, N);
+        return buf;
+    }
+    inline char* getFN(sd_file_t* file, char* buf, const uint8_t size) {
+        file->getName(buf, size);
+        return buf;
+    }
+    inline char* getFN(sd_file_t& file, char* buf, const uint8_t size) {
+        file.getName(buf, size);
+        return buf;
+    }
+    inline char* getFN(sd_file_t* file) {
+        return getFN(file, tempLongFilename);
+    }
+    inline char* getFN(sd_file_t& file) {
+        return getFN(file, tempLongFilename);
+    }
 #ifdef GLENN_DEBUG
     void writeToFile();
 #endif
+    uint32_t selectedFileSize;
+    uint32_t selectedFilePos;
+
+    sd_file_t selectedFile;
+    sd_fsys_t fileSystem;
+    SDState state;
+
+    char volumeLabel[21];
+
+    bool scheduledPause;
+    bool scheduledStop;
+    millis_t lastWriteTimeMS;
+    uint32_t writtenBytes;
+#if JSON_OUTPUT
+    GCodeFileInfo fileInfo;
+#endif
 private:
-    uint8_t lsRecursive(SdBaseFile* parent, uint8_t level, char* findFilename);
-    // SdFile *getDirectory(char* name);
+#if defined(ENABLE_SOFTWARE_SPI_CLASS) && ENABLE_SOFTWARE_SPI_CLASS
+    SoftSpiDriver<SD_SOFT_MISO_PIN, SD_SOFT_MOSI_PIN, SD_SOFT_SCK_PIN> softSpi;
+#endif
+
+    size_t mountRetries;
+    millis_t mountDebounceTimeMS;
+    bool printingSilent; // Will not report when starting or finishing printing
 };
 
 extern SDCard sd;
@@ -607,7 +700,10 @@ extern int debugWaitLoop;
 
 #include "communication/Commands.h"
 #include "communication/Eeprom.h"
+
+#if SDSUPPORT
 #include "communication/CSVParser.h"
+#endif
 
 #if CPU_ARCH == ARCH_AVR
 #define DELAY1MICROSECOND __asm__("nop\n\t" \
@@ -641,6 +737,7 @@ extern int debugWaitLoop;
 #include "motion/Drivers.h"
 #include "utilities/PlaneBuilder.h"
 #include "drivers/zprobe.h"
+#include "utilities/RVector3.h"
 
 #include "Events.h"
 #include "custom/customEvents.h"

@@ -35,13 +35,13 @@ bool PrinterType::positionAllowed(float pos[NUM_AXES], float zOfficial) {
         return true;
     }
     // Extra contrain to protect Z condition based on official coordinate system
-    if (zOfficial < Motion1::minPos[Z_AXIS] || zOfficial > Motion1::maxPos[Z_AXIS]) {
+    if (zOfficial < Motion1::minPos[Z_AXIS] - 0.01 || zOfficial > Motion1::maxPos[Z_AXIS] + 0.01) {
         return false;
     }
     for (fast8_t i = 0; i <= Z_AXIS; i++) {
         if (Motion1::axesHomed & axisBits[i]) {
-            if (pos[i] < Motion1::minPos[i]
-                || pos[i] > Motion1::maxPos[i]) {
+            if (pos[i] < Motion1::minPosOff[i]
+                || pos[i] > Motion1::maxPosOff[i]) {
                 return false;
             }
         }
@@ -56,8 +56,8 @@ void PrinterType::closestAllowedPositionWithNewXYOffset(float pos[NUM_AXES], flo
         Tool::minMaxOffsetForAxis(i, tOffMin, tOffMax);
 
         float p = pos[i] - offsets[i];
-        float minP = Motion1::minPos[i] + safety + tOffMax - tOffMin;
-        float maxP = Motion1::maxPos[i] - Motion1::rotMax[i] - safety + tOffMax - tOffMin;
+        float minP = Motion1::minPos[i] + safety - tOffMax;
+        float maxP = Motion1::maxPos[i] - safety - tOffMin;
         if (p < minP) {
             pos[i] += minP - p;
         } else if (p > maxP) {
@@ -139,8 +139,8 @@ float PrinterType::feedrateForMoveSteps(fast8_t axes) {
     return feedrate;
 }
 
-void PrinterType::deactivatedTool(fast8_t id) {}
-void PrinterType::activatedTool(fast8_t id) {}
+void PrinterType::deactivatedTool(fast8_t id) { }
+void PrinterType::activatedTool(fast8_t id) { }
 void PrinterType::eepromHandle() {
     EEPROM::handlePrefix(PSTR("Printer"));
     EEPROM::handleFloat(eprStart + 0, PSTR("Bed X Min [mm]"), 2, bedRectangle[X_AXIS][0]);
@@ -160,7 +160,7 @@ void PrinterType::init() {
     eprStart = EEPROM::reserve(EEPROM_SIGNATURE_CARTESIAN, 1, 4 * 4);
 }
 
-void PrinterType::updateDerived() {}
+void PrinterType::updateDerived() { }
 
 void PrinterType::enableMotors(fast8_t axes) {
     if (axes & 7) { // enable x,y,z as a group!
@@ -221,6 +221,7 @@ void PrinterType::M290(GCode* com) {
     InterruptProtectedBlock lock;
     if (com->hasZ()) {
         float z = constrain(com->Z, -2, 2);
+        Motion1::totalBabystepZ += z;
         Motion2::openBabysteps[X_AXIS] += z * COREXYZ_X_Z * Motion1::resolution[X_AXIS];
         Motion2::openBabysteps[Y_AXIS] += z * COREXYZ_Y_Z * Motion1::resolution[Y_AXIS];
         Motion2::openBabysteps[Z_AXIS] += z * COREXYZ_Z_Z * Motion1::resolution[Z_AXIS];
@@ -228,6 +229,24 @@ void PrinterType::M290(GCode* com) {
         Motion2::openBabysteps[A_AXIS] += z * COREXYZ_A_Z * Motion1::resolution[A_AXIS];
 #endif
     }
+    lock.unprotect();
+    Com::printFLN(PSTR("BabystepZ:"), Motion1::totalBabystepZ, 4);
+}
+
+bool PrinterType::runMCode(GCode* com) {
+    switch (com->M) {
+    case 290:
+        M290(com);
+        return false;
+    case 360:
+        M360();
+        return false;
+    }
+    return true;
+}
+
+bool PrinterType::runGCode(GCode* com) {
+    return false;
 }
 
 PGM_P PrinterType::getGeometryName() {

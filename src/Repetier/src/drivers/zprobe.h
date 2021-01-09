@@ -2,9 +2,9 @@
 
 class ZProbeHandler {
 public:
-    static void activate() { }
+    static bool activate() { return true; }
     static void deactivate() { }
-    static float runProbe() { return 0; }
+    static float runProbe(uint8_t repetitions = Z_PROBE_REPETITIONS, bool useMedian = Z_PROBE_USE_MEDIAN) { return 0; }
     static bool probingPossible() { return false; }
     static float xOffset() { return 0; }
     static float yOffset() { return 0; }
@@ -29,6 +29,9 @@ public:
     static void showConfigMenu(GUIAction action) { }
     static bool hasConfigMenu() { return false; }
 
+    static void showControlMenu(GUIAction action) { }
+    static bool hasControlMenu() { return false; }
+
     static bool getHeaterPause() { return false; }
     static void setHeaterPause(bool set) { }
 
@@ -50,10 +53,11 @@ class ZProbeHandler {
     static bool activated;
     static uint16_t userPausedHeaters;
     static bool pauseHeaters;
+
 public:
-    static void activate();
+    static bool activate();
     static void deactivate();
-    static float runProbe();
+    static float runProbe(uint8_t repetitions = Z_PROBE_REPETITIONS, bool useMedian = Z_PROBE_USE_MEDIAN);
     static bool probingPossible();
     static void init();
     static void eepromHandle();
@@ -79,6 +83,9 @@ public:
     static void showConfigMenu(GUIAction action);
     static bool hasConfigMenu() { return true; }
 
+    static void showControlMenu(GUIAction action) {};
+    static bool hasControlMenu() { return false; }
+
     static bool getHeaterPause() { return pauseHeaters; }
     static void setHeaterPause(bool set) { pauseHeaters = set; }
 
@@ -102,10 +109,11 @@ class ZProbeHandler {
 
     static uint16_t userPausedHeaters;
     static bool pauseHeaters;
+
 public:
-    static void activate();
+    static bool activate();
     static void deactivate();
-    static float runProbe();
+    static float runProbe(uint8_t repetitions = Z_PROBE_REPETITIONS, bool useMedian = Z_PROBE_USE_MEDIAN);
     static bool probingPossible();
     static float xOffset();
     static float yOffset();
@@ -133,6 +141,9 @@ public:
     static void showConfigMenu(GUIAction action);
     static bool hasConfigMenu() { return true; }
 
+    static void showControlMenu(GUIAction action) {};
+    static bool hasControlMenu() { return false; }
+
     static bool getHeaterPause() { return pauseHeaters; }
     static void setHeaterPause(bool set) { pauseHeaters = set; }
 
@@ -152,21 +163,25 @@ class ZProbeHandler {
     static float speed;
     static bool activated;
     static uint16_t userPausedHeaters;
+    static int16_t deployDelay;
     static bool pauseHeaters;
 
     static bool isAlarmOn();
     static void disableAlarmIfOn();
 
 public:
-    static void activate();
+    static bool activate();
     static void deactivate();
-    static float runProbe();
+    static float runProbe(uint8_t repetitions = Z_PROBE_REPETITIONS, bool useMedian = Z_PROBE_USE_MEDIAN);
     static bool probingPossible();
     static void init();
     static void eepromHandle();
     static void eepromReset();
     static float optimumProbingHeight();
     static bool isActive() { return activated; }
+
+    static void setDeployDelay(uint16_t in) { deployDelay = in; }
+    static uint16_t getDeployDelay() { return deployDelay; }
 
     static float xOffset();
     static float yOffset();
@@ -185,6 +200,9 @@ public:
 
     static void showConfigMenu(GUIAction action);
     static bool hasConfigMenu() { return true; }
+
+    static void showControlMenu(GUIAction action);
+    static bool hasControlMenu() { return true; }
 
     static bool getHeaterPause() { return pauseHeaters; }
     static void setHeaterPause(bool set) { pauseHeaters = set; }

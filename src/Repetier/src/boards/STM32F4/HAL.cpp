@@ -29,51 +29,12 @@
 #include <stm32f4xx_hal.h>
 #include <malloc.h>
 
-#if MOTHERBOARD == MOTHERBOARD_RUMBA32
-const PinMap PinMap_PWM[] = {
-    { PA_0, TIM2, STM_PIN_DATA_EXT(STM_MODE_AF_PP, GPIO_PULLUP, GPIO_AF1_TIM2, 1, 0) },    // TIM2_CH1
-    { PA_1, TIM5, STM_PIN_DATA_EXT(STM_MODE_AF_PP, GPIO_PULLUP, GPIO_AF2_TIM5, 2, 0) },    // TIM5_CH2
-    { PA_5, TIM2, STM_PIN_DATA_EXT(STM_MODE_AF_PP, GPIO_PULLUP, GPIO_AF1_TIM2, 1, 0) },    // TIM2_CH1
-    { PA_6, TIM13, STM_PIN_DATA_EXT(STM_MODE_AF_PP, GPIO_PULLUP, GPIO_AF9_TIM13, 1, 0) },  // TIM13_CH1
-    { PA_7, TIM14, STM_PIN_DATA_EXT(STM_MODE_AF_PP, GPIO_PULLUP, GPIO_AF9_TIM14, 1, 0) },  // TIM14_CH1
-    { PA_8, TIM1, STM_PIN_DATA_EXT(STM_MODE_AF_PP, GPIO_PULLUP, GPIO_AF1_TIM1, 1, 0) },    // TIM1_CH1
-    { PA_9, TIM1, STM_PIN_DATA_EXT(STM_MODE_AF_PP, GPIO_PULLUP, GPIO_AF1_TIM1, 2, 0) },    // TIM1_CH2
-    { PA_10, TIM1, STM_PIN_DATA_EXT(STM_MODE_AF_PP, GPIO_PULLUP, GPIO_AF1_TIM1, 3, 0) },   // TIM1_CH3
-    { PA_11, TIM1, STM_PIN_DATA_EXT(STM_MODE_AF_PP, GPIO_PULLUP, GPIO_AF1_TIM1, 4, 0) },   // TIM1_CH4
-    { PA_15, TIM2, STM_PIN_DATA_EXT(STM_MODE_AF_PP, GPIO_PULLUP, GPIO_AF1_TIM2, 1, 0) },   // TIM2_CH1
-    { PB_0, TIM8, STM_PIN_DATA_EXT(STM_MODE_AF_PP, GPIO_PULLUP, GPIO_AF3_TIM8, 2, 1) },    // TIM8_CH2N
-    { PB_1, TIM8, STM_PIN_DATA_EXT(STM_MODE_AF_PP, GPIO_PULLUP, GPIO_AF3_TIM8, 3, 1) },    // TIM8_CH3N
-    { PB_2, TIM2, STM_PIN_DATA_EXT(STM_MODE_AF_PP, GPIO_PULLUP, GPIO_AF1_TIM2, 4, 0) },    // TIM2_CH4
-    { PB_3, TIM2, STM_PIN_DATA_EXT(STM_MODE_AF_PP, GPIO_PULLUP, GPIO_AF1_TIM2, 2, 0) },    // TIM2_CH2
-    { PB_4, TIM3, STM_PIN_DATA_EXT(STM_MODE_AF_PP, GPIO_PULLUP, GPIO_AF2_TIM3, 1, 0) },    // TIM3_CH1
-    { PB_5, TIM3, STM_PIN_DATA_EXT(STM_MODE_AF_PP, GPIO_PULLUP, GPIO_AF2_TIM3, 2, 0) },    // TIM3_CH2
-    { PB_6, TIM4, STM_PIN_DATA_EXT(STM_MODE_AF_PP, GPIO_PULLUP, GPIO_AF2_TIM4, 1, 0) },    // TIM4_CH1
-    { PB_7, TIM4, STM_PIN_DATA_EXT(STM_MODE_AF_PP, GPIO_PULLUP, GPIO_AF2_TIM4, 2, 0) },    // TIM4_CH2
-    { PB_8, TIM4, STM_PIN_DATA_EXT(STM_MODE_AF_PP, GPIO_PULLUP, GPIO_AF2_TIM4, 3, 0) },    // TIM4_CH3
-    { PB_9, TIM11, STM_PIN_DATA_EXT(STM_MODE_AF_PP, GPIO_PULLUP, GPIO_AF3_TIM11, 1, 0) },  // TIM11_CH1
-    { PB_10, TIM2, STM_PIN_DATA_EXT(STM_MODE_AF_PP, GPIO_PULLUP, GPIO_AF1_TIM2, 3, 0) },   // TIM2_CH3
-    { PB_13, TIM1, STM_PIN_DATA_EXT(STM_MODE_AF_PP, GPIO_PULLUP, GPIO_AF1_TIM1, 1, 1) },   // TIM1_CH1N
-    { PB_14, TIM12, STM_PIN_DATA_EXT(STM_MODE_AF_PP, GPIO_PULLUP, GPIO_AF9_TIM12, 1, 0) }, // TIM12_CH1
-    { PB_15, TIM12, STM_PIN_DATA_EXT(STM_MODE_AF_PP, GPIO_PULLUP, GPIO_AF9_TIM12, 2, 0) }, // TIM12_CH2
-    { PC_6, TIM3, STM_PIN_DATA_EXT(STM_MODE_AF_PP, GPIO_PULLUP, GPIO_AF2_TIM3, 1, 0) },    // TIM3_CH1
-    { PC_7, TIM8, STM_PIN_DATA_EXT(STM_MODE_AF_PP, GPIO_PULLUP, GPIO_AF3_TIM8, 2, 0) },    // TIM8_CH2
-    // { PC_7, TIM3, STM_PIN_DATA_EXT(STM_MODE_AF_PP, GPIO_PULLUP, GPIO_AF2_TIM3, 2, 0) },    // TIM3_CH2
-    { PC_8, TIM3, STM_PIN_DATA_EXT(STM_MODE_AF_PP, GPIO_PULLUP, GPIO_AF2_TIM3, 3, 0) },  // TIM3_CH3
-                                                                                         //    { PC_9, TIM8, STM_PIN_DATA_EXT(STM_MODE_AF_PP, GPIO_PULLUP, GPIO_AF3_TIM8, 4, 0) },    // TIM8_CH4
-    { PC_9, TIM3, STM_PIN_DATA_EXT(STM_MODE_AF_PP, GPIO_PULLUP, GPIO_AF2_TIM3, 4, 0) },  // TIM3_CH4
-    { PD_14, TIM4, STM_PIN_DATA_EXT(STM_MODE_AF_PP, GPIO_PULLUP, GPIO_AF2_TIM4, 3, 0) }, // TIM4_CH3
-    { PD_15, TIM4, STM_PIN_DATA_EXT(STM_MODE_AF_PP, GPIO_PULLUP, GPIO_AF2_TIM4, 4, 0) }, // TIM4_CH4
-    { NC, NP, 0 }
-};
-
-#endif
-
 // Create timer names from TIMER_NUM macro
 
 #define _TIMER(num) TIM##num
 #define _TIMER_IRQ(num) TIM##num##_IRQn
-#define _TIMER_VECTOR(num) RF_TC##num##_Handler(HardwareTimer*)
-#define _TIMER_VECTOR_NAME(num) RF_TC##num##_Handler
+#define _TIMER_VECTOR(num) RAW_TIM##num##_IRQHandler(void)
+#define _TIMER_VECTOR_NAME(num) RAW_TIM##num##_IRQHandler
 
 #define TIMER(num) _TIMER(num)
 #define TIMER_IRQ(num) _TIMER_IRQ(num)
@@ -94,6 +55,7 @@ extern "C" char* sbrk(int i);
 char HAL::virtualEeprom[EEPROM_BYTES] = { 0 };
 bool HAL::wdPinged = true;
 uint8_t HAL::i2cError = 0;
+BootReason HAL::startReason = BootReason::UNKNOWN;
 
 enum class TimerUsage {
     UNUSED,
@@ -284,19 +246,20 @@ TimerFunction* motion3;
 TimerFunction* pwm;
 TimerFunction* servo;
 TimerFunction* toneTimer = nullptr;
-extern void TIMER_VECTOR(MOTION2_TIMER_NUM);
-extern void TIMER_VECTOR(MOTION3_TIMER_NUM);
-extern void TIMER_VECTOR(PWM_TIMER_NUM);
-extern void TIMER_VECTOR(TONE_TIMER_NUM);
+extern "C" void TIMER_VECTOR(MOTION2_TIMER_NUM);
+extern "C" void TIMER_VECTOR(MOTION3_TIMER_NUM);
+extern "C" void TIMER_VECTOR(PWM_TIMER_NUM);
+extern "C" void TIMER_VECTOR(TONE_TIMER_NUM);
 
-#if NUM_SERVOS > 0
-extern void servoOffTimer(HardwareTimer*);
-extern void TIMER_VECTOR(SERVO_TIMER_NUM);
+#if NUM_SERVOS > 0 || NUM_BEEPERS > 0
+extern void servoOffTimer();
+extern "C" void TIMER_VECTOR(SERVO_TIMER_NUM);
 static uint32_t ServoPrescalerfactor = 20000;
 static uint32_t Servo2500 = 2500;
 #endif
 
 void HAL::hwSetup(void) {
+    updateStartReason();
 #if DEBUG_TIMING
     SET_OUTPUT(DEBUG_ISR_STEPPER_PIN);
     SET_OUTPUT(DEBUG_ISR_MOTION_PIN);
@@ -308,10 +271,20 @@ void HAL::hwSetup(void) {
 
     servo = reserveTimerInterrupt(SERVO_TIMER_NUM); // prevent pwm usage
     servo->timer = new HardwareTimer(TIMER(SERVO_TIMER_NUM));
-    servo->timer->setPWM(1, NC, 200, 50, TIMER_VECTOR_NAME(SERVO_TIMER_NUM), servoOffTimer);
-    ServoPrescalerfactor = servo->tim->PSC + 1;
+    servo->timer->setMode(1, TIMER_OUTPUT_COMPARE, NC);
+    servo->timer->setOverflow(200, HERTZ_FORMAT);
+
+    LL_TIM_OC_EnableFast(TIMER(SERVO_TIMER_NUM), servo->timer->getLLChannel(1));
+    LL_TIM_OC_EnablePreload(TIMER(SERVO_TIMER_NUM), servo->timer->getLLChannel(1));
+
+    servo->timer->attachInterrupt(TIMER_VECTOR_NAME(SERVO_TIMER_NUM));
+    servo->timer->attachInterrupt(1, &servoOffTimer);
+    servo->timer->refresh();
+    servo->timer->resume();
+
+    ServoPrescalerfactor = (LL_TIM_GetPrescaler(servo->tim) + 1);
     Servo2500 = ((2500 * (servo->timer->getTimerClkFreq() / 1000000)) / ServoPrescalerfactor) - 1;
-    HAL_NVIC_SetPriority(TIMER_IRQ(SERVO_TIMER_NUM), 1, 0);
+    HAL_NVIC_SetPriority(TIMER_IRQ(SERVO_TIMER_NUM), 3, 0);
 #endif
 
 #if defined(TWI_CLOCK_FREQ) && TWI_CLOCK_FREQ > 0 //init i2c if we have a frequency
@@ -337,13 +310,15 @@ void HAL::hwSetup(void) {
 
 // Set up all timer interrupts
 void HAL::setupTimer() {
+    /*!< 4 bits for pre-emption priority (0-15) 0 bits for subpriority */
+    HAL_NVIC_SetPriorityGrouping(NVIC_PRIORITYGROUP_4);
     motion2 = reserveTimerInterrupt(MOTION2_TIMER_NUM); // prevent pwm usage
     motion2->timer = new HardwareTimer(TIMER(MOTION2_TIMER_NUM));
     motion2->timer->setMode(2, TIMER_OUTPUT_COMPARE);
     motion2->timer->setOverflow(PREPARE_FREQUENCY, HERTZ_FORMAT);
     motion2->timer->attachInterrupt(TIMER_VECTOR_NAME(MOTION2_TIMER_NUM));
     motion2->timer->resume();
-    HAL_NVIC_SetPriority(TIMER_IRQ(MOTION2_TIMER_NUM), 2, 0);
+    HAL_NVIC_SetPriority(TIMER_IRQ(MOTION2_TIMER_NUM), 4, 0);
 
     // Regular interrupts for heater control etc
 
@@ -371,13 +346,26 @@ void HAL::setupTimer() {
             // If we have any SW beepers, enable the beeper IRQ
             toneTimer = reserveTimerInterrupt(TONE_TIMER_NUM); // prevent pwm usage
             toneTimer->timer = new HardwareTimer(TIMER(TONE_TIMER_NUM));
-            toneTimer->timer->setMode(2, TIMER_OUTPUT_COMPARE);
-            toneTimer->timer->setOverflow(0, HERTZ_FORMAT);
+            // Timer 11 has only one channel, 1.
+            toneTimer->timer->setMode(1, TIMER_OUTPUT_COMPARE, NC);
             toneTimer->timer->attachInterrupt(TIMER_VECTOR_NAME(TONE_TIMER_NUM));
+            toneTimer->timer->attachInterrupt(1, [] {});
+            // Not on by default for output_compare
+            LL_TIM_OC_EnablePreload(TIMER(TONE_TIMER_NUM), toneTimer->timer->getLLChannel(1));
+            LL_TIM_OC_EnableFast(TIMER(TONE_TIMER_NUM), toneTimer->timer->getLLChannel(1));
+            toneTimer->timer->setInterruptPriority(2, 0);
+            toneTimer->timer->refresh();
+            toneTimer->timer->resume();
             break;
         }
     }
 #endif
+}
+
+// Called within checkForPeriodicalActions (main loop, more or less) 
+// as fast as possible
+void HAL::handlePeriodical() {
+
 }
 
 // Try to initialize pinNumber as hardware PWM. Returns internal
@@ -385,7 +373,7 @@ void HAL::setupTimer() {
 // are no pwm support for that pin or an other pin uses same PWM
 // channel.
 int HAL::initHardwarePWM(int pinNumber, uint32_t frequency) {
-    if (pinNumber < 0) {
+    if (pinNumber < 0 || !frequency) {
         return -1;
     }
     PinName p = digitalPinToPinName(pinNumber);
@@ -431,7 +419,9 @@ int HAL::initHardwarePWM(int pinNumber, uint32_t frequency) {
             uint32_t channel = STM_PIN_CHANNEL(map->function);
             pinMode(pinNumber, OUTPUT);
             digitalWrite(pinNumber, LOW);
+            // preloading on by default as of 1.9.0 (4.10900.200819)
             HT->setPWM(channel, p, tf->frequency, 0);
+            HT->refresh();
             return numPWMEntries++;
         }
     }
@@ -443,15 +433,14 @@ void HAL::setHardwarePWM(int id, int value) {
         return;
     }
     PWMEntry& entry = pwmEntries[id];
-    uint32_t channel = STM_PIN_CHANNEL(entry.map->function);
-    entry.ht->pause();
-    entry.ht->setCaptureCompare(channel, value, RESOLUTION_8B_COMPARE_FORMAT); // set pwm 0
-    entry.ht->resume();
+    entry.ht->setCaptureCompare(STM_PIN_CHANNEL(entry.map->function), value, RESOLUTION_8B_COMPARE_FORMAT);
 }
 
 void HAL::setHardwareFrequency(int id, uint32_t frequency) {
-    // TODO: handle HAL pwm frequency change requests
-    //
+    if (id < 0 || id >= 50 || !frequency) { // illegal id
+        return;
+    }
+    pwmEntries[id].ht->setOverflow(frequency, HERTZ_FORMAT);
 }
 
 ADC_HandleTypeDef AdcHandle = {};
@@ -559,28 +548,9 @@ void HAL::analogStart(void) {
     dmaInitState = hdma_adc.State;
     dmaInitError = hdma_adc.ErrorCode;
     __HAL_LINKDMA(&AdcHandle, DMA_Handle, hdma_adc);
-    HAL_NVIC_SetPriority(DMA2_Stream0_IRQn, 3, 0);
-    HAL_NVIC_EnableIRQ(DMA2_Stream0_IRQn);
     dmaerror += HAL_ADC_Start_DMA(&AdcHandle, (uint32_t*)&adcData, numAnalogInputs);
-}
-
-extern "C" void DMA2_Stream0_IRQHandler(void) {
-    HAL_DMA_IRQHandler(&hdma_adc);
-}
-
-extern "C" void HAL_ADC_ConvCpltCallback(ADC_HandleTypeDef* AdcHandle) {
-#ifdef DEBUG_TIMING
-    WRITE(DEBUG_ISR_ANALOG_PIN, 1);
-#endif
-    for (int i = 0; i < numAnalogInputs; i++) {
-        analogValues[i].lastValue = adcData[i];
-    }
-#undef IO_TARGET
-#define IO_TARGET IO_TARGET_ANALOG_INPUT_LOOP
-#include "io/redefine.h"
-#ifdef DEBUG_TIMING
-    WRITE(DEBUG_ISR_ANALOG_PIN, 0);
-#endif
+    // Just in case.
+    __HAL_DMA_DISABLE_IT(&hdma_adc, DMA_IT_HT | DMA_IT_TE | DMA_IT_TC);
 }
 
 void HAL::analogEnable(int pinId) {
@@ -659,71 +629,79 @@ void HAL::importEEPROM() {
 #endif
 
 millis_t eprSyncTime = 0; // in sync
-SdFile eepromFile;
-void HAL::syncEEPROM() { // store to disk if changed
-    millis_t time = millis();
-
-    if (eprSyncTime && (time - eprSyncTime > 15000)) { // Buffer writes only every 15 seconds to pool writes
-        eprSyncTime = 0;
-        bool failed = false;
-        if (!sd.sdactive) { // not mounted
-            if (eepromFile.isOpen())
+sd_file_t eepromFile;
+void HAL::syncEEPROM() {                                     // store to disk if changed
+    if (eprSyncTime && (millis() - eprSyncTime > 15000ul)) { // Buffer writes only every 15 seconds to pool writes
+        eprSyncTime = 0ul;
+        if (sd.state < SDState::SD_MOUNTED) { // not mounted
+            if (eepromFile.isOpen()) {
                 eepromFile.close();
-            Com::printErrorF("Could not write eeprom to sd card - no sd card mounted");
-            Com::println();
+            }
+            Com::printErrorFLN(PSTR("Could not write eeprom to sd card - no sd card mounted"));
             return;
         }
 
-        if (!eepromFile.seekSet(0))
-            failed = true;
-
-        if (!failed && eepromFile.write(virtualEeprom, EEPROM_BYTES) != EEPROM_BYTES)
-            failed = true;
-
-        if (failed) {
-            Com::printErrorF("Could not write eeprom to sd card");
-            Com::println();
+        eepromFile.rewind();
+        if ((eepromFile.write(virtualEeprom, EEPROM_BYTES) != EEPROM_BYTES
+             || !eepromFile.sync())) {
+            Com::printErrorFLN(PSTR("Could not write eeprom to sd card"));
+            sd.printIfCardErrCode();
         }
     }
 }
 
 void HAL::importEEPROM() {
-    if (eepromFile.isOpen())
-        eepromFile.close();
-    if (!eepromFile.open("eeprom.bin", O_RDWR | O_CREAT | O_SYNC) || eepromFile.read(virtualEeprom, EEPROM_BYTES) != EEPROM_BYTES) {
-        Com::printFLN(Com::tOpenFailedFile, "eeprom.bin");
-    } else {
-        Com::printFLN("EEPROM read from sd card.");
+    int readBytes = 0;
+    if (!eepromFile.open("eeprom.bin", O_RDWR | O_CREAT | O_SYNC)
+        || ((readBytes = eepromFile.read(virtualEeprom, EEPROM_BYTES)) != EEPROM_BYTES
+            && readBytes)) { // Sometimes we have a 0 byte eeprom.bin
+        Com::printFLN(Com::tOpenFailedFile, PSTR("eeprom.bin"));
     }
-    EEPROM::readDataFromEspi::beginEPROM();
+    EEPROM::readDataFromEEPROM();
+    if (eprSyncTime) {
+        eprSyncTime = HAL::timeInMilliseconds() | 1UL; // Reset any sync timer
+    }
 }
 
 #endif
 
-// Print apparent cause of start/restart
 void HAL::showStartReason() {
-    if (__HAL_RCC_GET_FLAG(RCC_FLAG_LPWRRST)) {
+    if (startReason == BootReason::LOW_POWER) {
         Com::printInfoFLN(PSTR("Low power reset"));
-    } else if (__HAL_RCC_GET_FLAG(RCC_FLAG_WWDGRST)) {
-        Com::printInfoFLN(Com::tWatchdog);
-    } else if (__HAL_RCC_GET_FLAG(RCC_FLAG_IWDGRST)) {
-        Com::printInfoFLN(PSTR("Independent watchdog reset"));
-    } else if (__HAL_RCC_GET_FLAG(RCC_FLAG_SFTRST)) {
-        Com::printInfoFLN(PSTR("Software reset"));
-    } else if (__HAL_RCC_GET_FLAG(RCC_FLAG_PORRST)) {
-        Com::printInfoFLN(Com::tPowerUp);
-    } else if (__HAL_RCC_GET_FLAG(RCC_FLAG_PINRST)) {
-        Com::printInfoFLN(PSTR("External reset pin reset"));
-    } else if (__HAL_RCC_GET_FLAG(RCC_FLAG_BORRST)) {
+    } else if (startReason == BootReason::BROWNOUT) {
         Com::printInfoFLN(Com::tBrownOut);
+    } else if (startReason == BootReason::WATCHDOG_RESET) {
+        Com::printInfoFLN(Com::tWatchdog);
+    } else if (startReason == BootReason::SOFTWARE_RESET) {
+        Com::printInfoFLN(PSTR("Software reset"));
+    } else if (startReason == BootReason::POWER_UP) {
+        Com::printInfoFLN(Com::tPowerUp);
+    } else if (startReason == BootReason::EXTERNAL_PIN) {
+        Com::printInfoFLN(PSTR("External reset pin reset"));
     } else {
         Com::printInfoFLN(PSTR("Unknown reset reason"));
     }
-
+}
+void HAL::updateStartReason() {
+    if (__HAL_RCC_GET_FLAG(RCC_FLAG_LPWRRST)) {
+        startReason = BootReason::LOW_POWER;
+    } else if (__HAL_RCC_GET_FLAG(RCC_FLAG_BORRST)) {
+        startReason = BootReason::BROWNOUT;
+    } else if (__HAL_RCC_GET_FLAG(RCC_FLAG_WWDGRST)
+               || __HAL_RCC_GET_FLAG(RCC_FLAG_IWDGRST)) {
+        startReason = BootReason::WATCHDOG_RESET;
+    } else if (__HAL_RCC_GET_FLAG(RCC_FLAG_SFTRST)) {
+        startReason = BootReason::SOFTWARE_RESET;
+    } else if (__HAL_RCC_GET_FLAG(RCC_FLAG_PORRST)) {
+        startReason = BootReason::POWER_UP;
+    } else if (__HAL_RCC_GET_FLAG(RCC_FLAG_PINRST)) {
+        startReason = BootReason::EXTERNAL_PIN;
+    } else {
+        startReason = BootReason::UNKNOWN;
+    }
     // Clear all the reset flags or else they will remain set during future resets until system power is fully removed.
     __HAL_RCC_CLEAR_RESET_FLAGS();
 }
-
 // Return available memory
 int HAL::getFreeRam() {
     struct mallinfo memstruct = mallinfo();
@@ -742,9 +720,7 @@ void HAL::resetHardware() {
  Setting for I2C Clock speed. needed to change  clock speed for different peripherals
 ****************************************************************************************/
 
-void HAL::i2cSetClockspeed(uint32_t clockSpeedHz)
-
-{
+void HAL::i2cSetClockspeed(uint32_t clockSpeedHz) {
     WIRE_PORT.setClock(clockSpeedHz);
 }
 
@@ -825,11 +801,13 @@ void HAL::servoMicroseconds(uint8_t servoId, int microsec, uint16_t autoOff) {
     servoTimings[servoId] = microsec ? ((microsec * (servo->timer->getTimerClkFreq() / 1000000)) / ServoPrescalerfactor) - 1 : 0;
     servoAutoOff[servoId] = (microsec) ? (autoOff / 20) : 0;
 }
+#endif
 
 // ================== Interrupt handling ======================
 
 ServoInterface* analogServoSlots[4] = { nullptr, nullptr, nullptr, nullptr };
-void servoOffTimer(HardwareTimer* timer) {
+INLINE inline void servoOffTimer() {
+#if NUM_SERVOS > 0
     if (actServo) {
         actServo->disable();
         if (servoAutoOff[servoId]) {
@@ -854,6 +832,7 @@ void servoOffTimer(HardwareTimer* timer) {
             servo->tim->CCR1 = Servo2500;
         }
     }
+#endif
 // Add all generated servo interrupt handlers
 #undef IO_TARGET
 #define IO_TARGET IO_TARGET_SERVO_INTERRUPT
@@ -862,11 +841,20 @@ void servoOffTimer(HardwareTimer* timer) {
 
 // Servo timer Interrupt handler
 void TIMER_VECTOR(SERVO_TIMER_NUM) {
-    if (actServo) {
-        actServo->enable();
-    }
-}
+#if NUM_SERVOS > 0 || NUM_BEEPERS > 0
+    if (LL_TIM_IsActiveFlag_CC1(TIMER(SERVO_TIMER_NUM))) {
+        LL_TIM_ClearFlag_CC1(TIMER(SERVO_TIMER_NUM));
+        servoOffTimer();
+    } else if (LL_TIM_IsActiveFlag_UPDATE(TIMER(SERVO_TIMER_NUM))) {
+        LL_TIM_ClearFlag_UPDATE(TIMER(SERVO_TIMER_NUM));
+#if NUM_SERVOS > 0
+        if (actServo && HAL::servoTimings[servoId]) {
+            actServo->enable();
+        }
 #endif
+    }
+#endif
+}
 
 /** \brief Timer interrupt routine to drive the stepper motors.
 */
@@ -874,6 +862,7 @@ void TIMER_VECTOR(MOTION3_TIMER_NUM) {
 #if DEBUG_TIMING
     WRITE(DEBUG_ISR_STEPPER_PIN, 1);
 #endif
+    LL_TIM_ClearFlag_UPDATE(TIMER(MOTION3_TIMER_NUM));
     Motion3::timer();
 #if DEBUG_TIMING
     WRITE(DEBUG_ISR_STEPPER_PIN, 0);
@@ -884,7 +873,7 @@ ufast8_t pwmSteps[] = { 1, 2, 4, 8, 16 };
 ufast8_t pwmMasks[] = { 255, 254, 252, 248, 240 };
 
 /**
-This timer is called 5000 times per second. It is used to update
+This timer is called 10000 times per second. It is used to update
 pwm values for heater and some other frequent jobs.
 */
 
@@ -894,6 +883,7 @@ void TIMER_VECTOR(PWM_TIMER_NUM) {
 #endif
     //InterruptProtectedBlock noInt;
 
+    LL_TIM_ClearFlag_UPDATE(TIMER(PWM_TIMER_NUM));
     static uint8_t pwm_count0 = 0; // Used my IO_PWM_SOFTWARE!
     static uint8_t pwm_count1 = 0;
     static uint8_t pwm_count2 = 0;
@@ -915,6 +905,23 @@ void TIMER_VECTOR(PWM_TIMER_NUM) {
     pwm_count2 += 4;
     pwm_count3 += 8;
     pwm_count4 += 16;
+
+    if (__HAL_DMA_GET_FLAG(&hdma_adc, __HAL_DMA_GET_TC_FLAG_INDEX(&hdma_adc))) {
+#ifdef DEBUG_TIMING
+        WRITE(DEBUG_ISR_ANALOG_PIN, 1);
+#endif
+        for (int i = 0; i < numAnalogInputs; i++) {
+            analogValues[i].lastValue = adcData[i];
+        }
+#undef IO_TARGET
+#define IO_TARGET IO_TARGET_ANALOG_INPUT_LOOP
+#include "io/redefine.h"
+        __HAL_DMA_CLEAR_FLAG(&hdma_adc, __HAL_DMA_GET_TC_FLAG_INDEX(&hdma_adc));
+#ifdef DEBUG_TIMING
+        WRITE(DEBUG_ISR_ANALOG_PIN, 0);
+#endif
+    }
+
     GUI::handleKeypress();
 #if FEATURE_WATCHDOG
     if (HAL::wdPinged) {
@@ -932,6 +939,7 @@ void TIMER_VECTOR(MOTION2_TIMER_NUM) {
 #if DEBUG_TIMING
     WRITE(DEBUG_ISR_MOTION_PIN, 1);
 #endif
+    LL_TIM_ClearFlag_UPDATE(TIMER(MOTION2_TIMER_NUM));
     Motion2::timer();
 #if DEBUG_TIMING
     WRITE(DEBUG_ISR_MOTION_PIN, 0);
@@ -954,12 +962,23 @@ void HAL::spiEnd() {
 
 #if NUM_BEEPERS > 0
 void TIMER_VECTOR(TONE_TIMER_NUM) {
+    bool beeperIRQPhase = false;
+    if (LL_TIM_IsActiveFlag_UPDATE(TIMER(TONE_TIMER_NUM))) {
+        LL_TIM_ClearFlag_UPDATE(TIMER(TONE_TIMER_NUM));
+        beeperIRQPhase = true;
+    }
+    if (LL_TIM_IsActiveFlag_CC1(TIMER(TONE_TIMER_NUM))) {
+        LL_TIM_ClearFlag_CC1(TIMER(TONE_TIMER_NUM));
+        beeperIRQPhase = false;
+    }
 #undef IO_TARGET
 #define IO_TARGET IO_TARGET_BEEPER_LOOP
 #include "io/redefine.h"
+    UNUSED(beeperIRQPhase);
 }
 #endif
 
+static bool toneStopped = true;
 void HAL::tone(uint32_t frequency) {
 #if NUM_BEEPERS > 0
 #if NUM_BEEPERS > 1
@@ -996,9 +1015,17 @@ void HAL::tone(uint32_t frequency) {
     if (frequency < 1) {
         return;
     }
-    toneTimer->timer->pause();
-    toneTimer->timer->setOverflow(2 * frequency, HERTZ_FORMAT);
-    toneTimer->timer->resume();
+
+    uint32_t autoReload = (F_CPU_TRUE / frequency);
+    uint32_t prescale = (autoReload / 0x10000) + 1;
+    LL_TIM_SetPrescaler(TIMER(TONE_TIMER_NUM), prescale - 1);
+    autoReload /= prescale;
+    LL_TIM_SetAutoReload(TIMER(TONE_TIMER_NUM), autoReload);
+    LL_TIM_OC_SetCompareCH1(TIMER(TONE_TIMER_NUM), ((autoReload + 1) * (Printer::toneVolume * 50)) / 10000);
+    if (toneStopped) { // Only generate updates if the timer's dead.
+        LL_TIM_GenerateEvent_UPDATE(TIMER(TONE_TIMER_NUM));
+        toneStopped = false;
+    }
 #endif
 }
 void HAL::noTone() {
@@ -1012,9 +1039,8 @@ void HAL::noTone() {
         }
     }
 #endif
-    if (toneTimer != nullptr) { // could be called before timer are initialized!
-        toneTimer->timer->pause();
-    }
+    LL_TIM_SetAutoReload(TIMER(TONE_TIMER_NUM), 0);
+    toneStopped = true;
 #endif
 }
 

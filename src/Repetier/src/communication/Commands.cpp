@@ -36,26 +36,27 @@ void Commands::commandLoop() {
     Printer::breakLongCommand = false; // block is now finished
     if (!Printer::isBlockingReceive()) {
 #if SDSUPPORT
-        if (sd.sdmode == 20) {
+        if (sd.scheduledPause) {
             if (Motion1::buffersUsed() == 0) {
-                sd.pausePrintPart2();
+                sd.printFullyPaused();
             }
-        }
-        if (sd.sdmode == 21) {
+        } else if (sd.scheduledStop) {
             if (Motion1::buffersUsed() == 0) {
-                sd.stopPrintPart2();
+                sd.printFullyStopped();
             }
         }
 #endif
         GCode::readFromSerial();
         GCode* code = GCode::peekCurrentCommand();
+        millis_t curTime = HAL::timeInMilliseconds();
         if (code) {
 #if SDSUPPORT
-            if (sd.savetosd) {
-                if (!(code->hasM() && code->M == 29)) // still writing to file
+            if (sd.state == SDState::SD_WRITING) {
+                if (!(code->hasM() && code->M == 29u)) { // still writing to file
                     sd.writeCommand(code);
-                else
+                } else {
                     sd.finishWrite();
+                }
 #if ECHO_ON_EXECUTE
                 code->echoCommand();
 #endif
@@ -63,15 +64,24 @@ void Commands::commandLoop() {
 #endif
                 Commands::executeGCode(code);
             code->popCurrentCommand();
-            lastCommandReceived = HAL::timeInMilliseconds();
+            lastCommandReceived = curTime;
         } else {
             if (Motion1::buffersUsed() > 0) { // if printing no need to reset
-                lastCommandReceived = HAL::timeInMilliseconds();
+                lastCommandReceived = curTime;
             }
-            if (HAL::timeInMilliseconds() - lastCommandReceived > 2000) {
-                lastCommandReceived = HAL::timeInMilliseconds();
+            if ((curTime - lastCommandReceived) > 2000ul) {
+                lastCommandReceived = curTime;
                 Printer::parkSafety(); // will handle allowed conditions it self
             }
+#if SDSUPPORT
+            // 5 minute timeout if we never receive anything.
+            if (sd.state == SDState::SD_WRITING) {
+                if ((curTime - sd.lastWriteTimeMS) > (5ul * 60000ul)) {
+                    GUI::setStatusP(PSTR("Receive timeout!"), GUIStatusLevel::WARNING);
+                    sd.finishWrite();
+                }
+            }
+#endif
         }
     } else {
         GCode::keepAlive(FirmwareState::Paused);
@@ -82,9 +92,19 @@ void Commands::commandLoop() {
 void Commands::checkForPeriodicalActions(bool allowNewMoves) {
     Printer::handleInterruptEvent();
     FirmwareEvent::handleEvents();
+    HAL::handlePeriodical();
+    if (Printer::reportFlag) {
+        if (Printer::isReportFlag(PRINTER_REPORT_FLAG_ENDSTOPS)) {
+            MCode_119(nullptr);
+            Printer::reportFlagReset(PRINTER_REPORT_FLAG_ENDSTOPS);
+        }
+    }
 #if EMERGENCY_PARSER
     GCodeSource::prefetchAll();
 #endif
+    if (Printer::isRescueRequired() || Motion1::length != 0 || Printer::isMenuMode(MENU_MODE_SD_PRINTING + MENU_MODE_PAUSED)) {
+        previousMillisCmd = HAL::timeInMilliseconds();
+    }
     EVENT_PERIODICAL;
 #if defined(DOOR_PIN) && DOOR_PIN > -1
     if (Printer::updateDoorOpen()) {
@@ -97,9 +117,10 @@ void Commands::checkForPeriodicalActions(bool allowNewMoves) {
 #undef IO_TARGET
 #define IO_TARGET IO_TARGET_PERIODICAL_ACTIONS
 #include "../io/redefine.h"
-
-    if (!executePeriodical)
+    if (!executePeriodical) {
         return; // gets true every 100ms
+    }
+
     executePeriodical = 0;
     EEPROM::timerHandler(); // store changes after timeout
     // include generic 100ms calls
@@ -110,15 +131,26 @@ void Commands::checkForPeriodicalActions(bool allowNewMoves) {
     HAL::pingWatchdog();
 #endif
 
-    // Report temperatures every second, so we do not need to send M105
+    // Report temperatures every autoReportPeriodMS (default 1000ms), so we do not need to send M105
     if (Printer::isAutoreportTemp()) {
         millis_t now = HAL::timeInMilliseconds();
-        if (now - Printer::lastTempReport > 1000) {
+        if (now - Printer::lastTempReport > Printer::autoTempReportPeriodMS) {
             Printer::lastTempReport = now;
+            Com::writeToAll = true; // need to be sure to receive correct receipient
             Commands::printTemperatures();
         }
     }
-
+#if SDSUPPORT
+    // Reports the sd file byte position every autoSDReportPeriodMS if set, and only if printing.
+    if (Printer::isAutoreportSD() && sd.state == SDState::SD_PRINTING) {
+        millis_t now = HAL::timeInMilliseconds();
+        if (now - Printer::lastSDReport > Printer::autoSDReportPeriodMS) {
+            Printer::lastSDReport = now;
+            Com::writeToAll = true; // need to be sure to receive correct receipient
+            sd.printStatus();
+        }
+    }
+#endif
     EVENT_TIMER_100MS;
     // Extruder::manageTemperatures();
     if (--counter500ms == 0) {
@@ -174,11 +206,12 @@ void Commands::waitUntilEndOfAllBuffers() {
         code = GCode::peekCurrentCommand();
         if (code) {
 #if SDSUPPORT
-            if (sd.savetosd) {
-                if (!(code->hasM() && code->M == 29)) // still writing to file
+            if (sd.state == SDState::SD_WRITING) {
+                if (!(code->hasM() && code->M == 29)) {
                     sd.writeCommand(code);
-                else
+                } else {
                     sd.finishWrite();
+                }
 #if ECHO_ON_EXECUTE
                 code->echoCommand();
 #endif
@@ -191,8 +224,7 @@ void Commands::waitUntilEndOfAllBuffers() {
     }
 }
 
-void Commands::printTemperatures(bool showRaw) {
-    int error;
+void Commands::printTemperatures() {
 #if NUM_TOOLS > 0
     Tool* t = Tool::getActiveTool();
     if (t != nullptr && t->supportsTemperatures()) {
@@ -221,20 +253,22 @@ void Commands::printTemperatures(bool showRaw) {
 }
 
 void Commands::changeFeedrateMultiply(int factor) {
-    if (factor < 25)
+    if (factor < 25) {
         factor = 25;
-    if (factor > 500)
+    } else if (factor > 500) {
         factor = 500;
+    }
     Printer::feedrate *= (float)factor / (float)Printer::feedrateMultiply;
     Printer::feedrateMultiply = factor;
     Com::printFLN(Com::tSpeedMultiply, factor);
 }
 
 void Commands::changeFlowrateMultiply(int factor) {
-    if (factor < 25)
+    if (factor < 25) {
         factor = 25;
-    if (factor > 200)
+    } else if (factor > 200) {
         factor = 200;
+    }
     Printer::extrudeMultiply = factor;
     // TODO: volumetric extrusion
     //if (Extruder::current->diameter <= 0)
@@ -280,6 +314,7 @@ void Commands::processGCode(GCode* com) {
         previousMillisCmd = HAL::timeInMilliseconds();
         return;
     }
+    bool unknown = false;
     switch (com->G) {
     case 0: // G0 -> G1
     case 1: // G1
@@ -364,7 +399,13 @@ void Commands::processGCode(GCode* com) {
     case 205:
         GCode_205(com);
         break;
+    case 320:
+        unknown = PrinterType::runGCode(com);
+        break;
     default:
+        unknown = true;
+    }
+    if (unknown) {
         if (Printer::debugErrors()) {
             Com::printF(Com::tUnknownCommand);
             com->printCommand();
@@ -377,14 +418,16 @@ void Commands::processGCode(GCode* com) {
 */
 extern void reportAnalog();
 void Commands::processMCode(GCode* com) {
-    if (Printer::failedMode && !(com->M == 110 || com->M == 999 || com->M == 0)) {
-        return;
+    if (Printer::failedMode && (com->M == 104 || com->M == 109 || com->M == 190 || com->M == 140 || com->M == 141 || com->M == 600 || com->M == 601)) {
+        return; // one of the forbidden m codes was send
     }
 
     if (EVENT_UNHANDLED_M_CODE(com)) {
         return;
     }
-    switch (com->M) {
+    bool unknown = false;
+    uint16_t mCode = com->isPriorityM() ? com->getPriorityM() : com->M;
+    switch (mCode) {
     case 0:
         // HAL::reportHALDebug();
         break;
@@ -475,7 +518,7 @@ void Commands::processMCode(GCode* com) {
     case 84: // M84
         MCode_84(com);
         break;
-    case 85: // M85
+    case 85: // M85 S<seconds> - Set an inactivity shutdown timer. (maxInactiveTime)
         MCode_85(com);
         break;
     case 92: // M92
@@ -557,10 +600,10 @@ void Commands::processMCode(GCode* com) {
     case 200: // M200 T<extruder> D<diameter>
         MCode_200(com);
         break;
-    case 201: // M201
+    case 201: // M201 <XYZE> Set temporary axis print accelerations in units/s^2
         MCode_201(com);
         break;
-    case 202: // M202 travel acceleration, but no difference atm
+    case 202: // M202 <XYZE> Set temporary axis travel accelerations in units/s^2
         MCode_202(com);
         break;
     case 203: // M203
@@ -582,6 +625,9 @@ void Commands::processMCode(GCode* com) {
         break;
     case 209: // M209 S<0/1> Enable/disable autoretraction
         MCode_209(com);
+        break;
+    case 218: // M218 T<toolid> X<offsetX> Y<offsetY> Z<offsetZ> - Store new tool offsets
+        MCode_218(com);
         break;
     case 220: // M220 S<Feedrate multiplier in percent>
         MCode_220(com);
@@ -678,7 +724,10 @@ void Commands::processMCode(GCode* com) {
     case 513:
         MCode_513(com);
         break;
-    //- M530 S<printing> L<layer> - Enables explicit printing mode (S1) or disables it (S0). L can set layer count
+    case 524: // Abort SD printing
+        MCode_524(com);
+        break;
+        //- M530 S<printing> L<layer> - Enables explicit printing mode (S1) or disables it (S0). L can set layer count
     case 530:
         MCode_530(com);
         break;
@@ -696,8 +745,14 @@ void Commands::processMCode(GCode* com) {
     case 540: // report motion buffers
         MCode_540(com);
         break;
+    case 576: // M576 S1 enables out of order execution
+        MCode_576(com);
+        break;
     case 569: // Set stealthchop
         MCode_Stepper(com);
+        break;
+    case 575: // Update all serial baudrates
+        MCode_575(com);
         break;
     case 600:
         MCode_600(com);
@@ -714,11 +769,18 @@ void Commands::processMCode(GCode* com) {
     case 606: // Park extruder
         MCode_606(com);
         break;
+    case 665:
+    case 666:
+        PrinterType::runMCode(com);
+        break;
     case 669: // Measure lcd refresh time
         MCode_669(com);
         break;
     case 900: // M233 now use M900 like Marlin
         MCode_900(com);
+        break;
+    case 906: // Report TMC current
+        MCode_Stepper(com);
         break;
     case 907: // M907 Set digital trimpot/DAC motor current using axis codes.
         MCode_907(com);
@@ -747,6 +809,9 @@ void Commands::processMCode(GCode* com) {
             EEPROM::setVersion(com->S);
         break;
 #endif
+    case 876:
+        MCode_876(com);
+        break;
     case 890:
         MCode_890(com);
         break;
@@ -780,12 +845,15 @@ void Commands::processMCode(GCode* com) {
         Com::printFLN(PSTR(" YPosSteps:"), lp[1]);
     } break; */
     default:
+        unknown = true;
+    } // switch
+    if (unknown) {
         if (Printer::debugErrors()) {
             Com::writeToAll = false;
             Com::printF(Com::tUnknownCommand);
             com->printCommand();
         }
-    } // switch
+    }
 }
 
 /**
@@ -808,13 +876,13 @@ void Commands::executeGCode(GCode* com) {
     if (com->hasG()) {
         processGCode(com);
     } else if (com->hasM()) {
-        processMCode(com);
+        if (!com->isPriorityM()) {
+            processMCode(com);
+        }
     } else if (com->hasT()) { // Process T code
         if (!Printer::failedMode) {
-            //com->printCommand(); // for testing if this the source of extruder switches
             Motion1::waitForEndOfMoves();
             Tool::selectTool(com->T);
-            // Extruder::selectExtruderById(com->T);
         }
     } else {
         if (Printer::debugErrors()) {

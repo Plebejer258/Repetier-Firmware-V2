@@ -80,7 +80,7 @@
 
 #elif IO_TARGET == IO_TARGET_100MS // 100ms
 
-#define IO_PWM_KICKSTART(name, pwmname, timems, treshold) \
+#define IO_PWM_KICKSTART(name, pwmname, time100ms, treshold) \
     if (name.kickcount > 0) { \
         if (--name.kickcount == 0) { \
             pwmname.set(name.pwm); \
@@ -90,7 +90,7 @@
 #define IO_PWM_RAMP(name, pwmname, upDelay100ms, downDelay100ms, difThreshold) \
     if (name.realPwm != name.targPwm) { \
         if (!GCode::hasFatalError()) { \
-            name.realPwm = RMath::min(RMath::max((name.realPwm + (name.targPwm > name.realPwm ? name.steps : -name.steps)), 0), (255 << name.scale)); \
+            name.realPwm = RMath::min(RMath::max((name.realPwm + (name.targPwm > name.realPwm ? name.steps : -name.steps)), static_cast<uint16_t>(0u)), static_cast<uint16_t>(255u << name.scale)); \
             if (abs(name.realPwm - name.targPwm) <= name.steps) { \
                 name.realPwm = name.targPwm; \
             } \
@@ -237,7 +237,9 @@
             : pwm(0) \
             , kickcount(0) {} \
         void set(fast8_t _pwm) final { \
-            if (kickcount == 0 && _pwm < treshold && _pwm > 0 && time100ms > 0) { \
+            if (kickcount == 0 && _pwm < treshold \
+                && (pwm == 0 && _pwm > 0) \
+                && time100ms > 0) { \
                 pwm = _pwm; \
                 kickcount = time100ms; \
                 pwmname.set(255); \
@@ -340,7 +342,7 @@
 #define IO_PWM_MIN_SPEED(name, pwmname, minValue, offBelow) \
     name##Class name;
 
-#define IO_PWM_KICKSTART(name, pwmname, timems, treshold) \
+#define IO_PWM_KICKSTART(name, pwmname, time100ms, treshold) \
     name##Class name;
 
 #define IO_PWM_RAMP(name, pwmname, upDelay100ms, downDelay100ms, difThreshold) \
@@ -376,7 +378,7 @@
 #define IO_PWM_MIN_SPEED(name, pwmname, minValue, offBelow)
 #endif
 #ifndef IO_PWM_KICKSTART
-#define IO_PWM_KICKSTART(name, pwmname, timems, treshold)
+#define IO_PWM_KICKSTART(name, pwmname, time100ms, treshold)
 #endif
 #ifndef IO_PWM_RAMP
 #define IO_PWM_RAMP(name, pwmname, upDelay100ms, downDelay100ms, difThreshold)

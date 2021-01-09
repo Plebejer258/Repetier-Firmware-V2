@@ -58,6 +58,7 @@ static uint32_t adcEnable = 0;
 char HAL::virtualEeprom[EEPROM_BYTES] = { 0, 0, 0, 0, 0, 0, 0 };
 bool HAL::wdPinged = true;
 uint8_t HAL::i2cError = 0;
+BootReason HAL::startReason = BootReason::UNKNOWN;
 
 volatile uint8_t HAL::insideTimer1 = 0;
 #ifndef DUE_SOFTWARE_SPI
@@ -86,9 +87,10 @@ void HAL::setupTimer() {
     //NVIC_SetPriorityGrouping(4);
 
     // Timer for extruder control
+#if (DISABLED(MOTION2_USE_REALTIME_TIMER) || PREPARE_FREQUENCY > (PWM_CLOCK_FREQ / 2))
     pmc_enable_periph_clk(MOTION2_TIMER_IRQ); // enable power to timer
     //NVIC_SetPriority((IRQn_Type)EXTRUDER_TIMER_IRQ, NVIC_EncodePriority(4, 4, 1));
-    NVIC_SetPriority((IRQn_Type)MOTION2_TIMER_IRQ, 15);
+    NVIC_SetPriority((IRQn_Type)MOTION2_TIMER_IRQ, 2);
 
     // count up to value in RC register using given clock
     TC_Configure(MOTION2_TIMER, MOTION2_TIMER_CHANNEL, TC_CMR_WAVSEL_UP_RC | TC_CMR_WAVE | TC_CMR_TCCLKS_TIMER_CLOCK1);
@@ -103,11 +105,17 @@ void HAL::setupTimer() {
 
     // allow interrupts on timer
     NVIC_EnableIRQ((IRQn_Type)MOTION2_TIMER_IRQ);
+#else
+    RTT_SetPrescaler(RTT, (32768 / PREPARE_FREQUENCY) - 1);
+    RTT_EnableIT(RTT, RTT_MR_RTTINCIEN);
+    NVIC_SetPriority(RTT_IRQn, 2);
+    NVIC_EnableIRQ(RTT_IRQn);
+#endif
 
     // Regular interrupts for heater control etc
     pmc_enable_periph_clk(PWM_TIMER_IRQ);
     //NVIC_SetPriority((IRQn_Type)PWM_TIMER_IRQ, NVIC_EncodePriority(4, 6, 0));
-    NVIC_SetPriority((IRQn_Type)PWM_TIMER_IRQ, 15);
+    NVIC_SetPriority((IRQn_Type)PWM_TIMER_IRQ, 6);
 
     TC_FindMckDivisor(PWM_CLOCK_FREQ, F_CPU_TRUE, &tc_count, &tc_clock, F_CPU_TRUE);
     TC_Configure(PWM_TIMER, PWM_TIMER_CHANNEL, TC_CMR_WAVSEL_UP_RC | TC_CMR_WAVE | tc_clock);
@@ -140,7 +148,7 @@ void HAL::setupTimer() {
 #if NUM_SERVOS > 0 || NUM_BEEPER > 0
     pmc_enable_periph_clk(SERVO_TIMER_IRQ);
     //NVIC_SetPriority((IRQn_Type)SERVO_TIMER_IRQ, NVIC_EncodePriority(4, 5, 0));
-    NVIC_SetPriority((IRQn_Type)SERVO_TIMER_IRQ, 4);
+    NVIC_SetPriority((IRQn_Type)SERVO_TIMER_IRQ, 3);
 
     TC_Configure(SERVO_TIMER, SERVO_TIMER_CHANNEL, TC_CMR_WAVSEL_UP_RC | TC_CMR_WAVE | TC_CMR_TCCLKS_TIMER_CLOCK1);
 
@@ -157,17 +165,23 @@ void HAL::setupTimer() {
             // If we have any SW beepers, enable the beeper IRQ
             pmc_set_writeprotect(false);
             pmc_enable_periph_clk((uint32_t)BEEPER_TIMER_IRQ);
-            NVIC_SetPriority((IRQn_Type)BEEPER_TIMER_IRQ, 25);
+            NVIC_SetPriority((IRQn_Type)BEEPER_TIMER_IRQ, 1);
 
             TC_Configure(BEEPER_TIMER, BEEPER_TIMER_CHANNEL, TC_CMR_WAVE | TC_CMR_WAVSEL_UP_RC | TC_CMR_TCCLKS_TIMER_CLOCK1);
 
-            BEEPER_TIMER->TC_CHANNEL[BEEPER_TIMER_CHANNEL].TC_IER = TC_IER_CPCS;
-            BEEPER_TIMER->TC_CHANNEL[BEEPER_TIMER_CHANNEL].TC_IDR = ~TC_IER_CPCS;
+            BEEPER_TIMER->TC_CHANNEL[BEEPER_TIMER_CHANNEL].TC_IER = TC_IER_CPCS | TC_IER_CPAS;
+            BEEPER_TIMER->TC_CHANNEL[BEEPER_TIMER_CHANNEL].TC_IDR = ~TC_IER_CPCS & ~TC_IER_CPAS;
             NVIC_EnableIRQ((IRQn_Type)BEEPER_TIMER_IRQ);
             break;
         }
     }
 #endif
+}
+
+// Called within checkForPeriodicalActions (main loop, more or less) 
+// as fast as possible
+void HAL::handlePeriodical() {
+
 }
 
 struct TimerPWMPin {
@@ -585,66 +599,80 @@ void HAL::importEEPROM() {
 #error EEPROM using sd card requires SDCARDSUPPORT
 #endif
 
-millis_t eprSyncTime = 0; // in sync
-SdFile eepromFile;
-void HAL::syncEEPROM() { // store to disk if changed
-    millis_t time = millis();
-
-    if (eprSyncTime && (time - eprSyncTime > 15000)) { // Buffer writes only every 15 seconds to pool writes
-        eprSyncTime = 0;
-        bool failed = false;
-        if (!sd.sdactive) { // not mounted
-            if (eepromFile.isOpen())
+millis_t eprSyncTime = 0ul; // in sync
+sd_file_t eepromFile;
+void HAL::syncEEPROM() {                                     // store to disk if changed
+    if (eprSyncTime && (millis() - eprSyncTime > 15000ul)) { // Buffer writes only every 15 seconds to pool writes
+        eprSyncTime = 0ul;
+        if (sd.state < SDState::SD_MOUNTED) { // not mounted
+            if (eepromFile.isOpen()) {
                 eepromFile.close();
-            Com::printErrorF("Could not write eeprom to sd card - no sd card mounted");
-            Com::println();
+            }
+            Com::printErrorFLN(PSTR("Could not write eeprom to sd card - no sd card mounted"));
             return;
         }
 
-        if (!eepromFile.seekSet(0))
-            failed = true;
-
-        if (!failed && eepromFile.write(virtualEeprom, EEPROM_BYTES) != EEPROM_BYTES)
-            failed = true;
-
-        if (failed) {
-            Com::printErrorF("Could not write eeprom to sd card");
-            Com::println();
+        eepromFile.rewind();
+        if ((eepromFile.write(virtualEeprom, EEPROM_BYTES) != EEPROM_BYTES
+             || !eepromFile.sync())) {
+            Com::printErrorFLN(PSTR("Could not write eeprom to sd card"));
+            sd.printIfCardErrCode();
         }
     }
 }
 
 void HAL::importEEPROM() {
-    if (eepromFile.isOpen())
-        eepromFile.close();
-    if (!eepromFile.open("eeprom.bin", O_RDWR | O_CREAT | O_SYNC) || eepromFile.read(virtualEeprom, EEPROM_BYTES) != EEPROM_BYTES) {
-        Com::printFLN(Com::tOpenFailedFile, "eeprom.bin");
-    } else {
-        Com::printFLN("EEPROM read from sd card.");
+    int readBytes = 0;
+    if (!eepromFile.open("eeprom.bin", O_RDWR | O_CREAT | O_SYNC)
+        || ((readBytes = eepromFile.read(virtualEeprom, EEPROM_BYTES)) != EEPROM_BYTES
+            && readBytes)) { // Sometimes we have a 0 byte eeprom.bin
+        Com::printFLN(Com::tOpenFailedFile, PSTR("eeprom.bin"));
     }
     EEPROM::readDataFromEEPROM();
+    if (eprSyncTime) {
+        eprSyncTime = HAL::timeInMilliseconds() | 1UL; // Reset any sync timer
+    }
 }
 
 #endif
 
 // Print apparent cause of start/restart
 void HAL::showStartReason() {
+    if (startReason == BootReason::BROWNOUT) {
+        Com::printInfoFLN(Com::tBrownOut);
+    } else if (startReason == BootReason::WATCHDOG_RESET) {
+        Com::printInfoFLN(Com::tWatchdog);
+    } else if (startReason == BootReason::SOFTWARE_RESET) {
+        Com::printInfoFLN(PSTR("Software reset"));
+    } else if (startReason == BootReason::POWER_UP) {
+        Com::printInfoFLN(Com::tPowerUp);
+    } else if (startReason == BootReason::EXTERNAL_PIN) {
+        Com::printInfoFLN(PSTR("External reset pin reset"));
+    } else {
+        Com::printInfoFLN(PSTR("Unknown reset reason"));
+    }
+}
+void HAL::updateStartReason() {
     int mcu = (RSTC->RSTC_SR & RSTC_SR_RSTTYP_Msk) >> RSTC_SR_RSTTYP_Pos;
     switch (mcu) {
     case 0:
-        Com::printInfoFLN(Com::tPowerUp);
+        startReason = BootReason::POWER_UP;
         break;
     case 1:
         // this is return from backup mode on SAM
-        Com::printInfoFLN(Com::tBrownOut);
+        startReason = BootReason::BROWNOUT;
+        break;
     case 2:
-        Com::printInfoFLN(Com::tWatchdog);
+        startReason = BootReason::WATCHDOG_RESET;
         break;
     case 3:
-        Com::printInfoFLN(Com::tSoftwareReset);
+        startReason = BootReason::SOFTWARE_RESET;
         break;
     case 4:
-        Com::printInfoFLN(Com::tExternalReset);
+        startReason = BootReason::EXTERNAL_PIN;
+        break;
+    default:
+        startReason = BootReason::UNKNOWN;
     }
 }
 
@@ -968,11 +996,10 @@ void HAL::servoMicroseconds(uint8_t servo, int microsec, uint16_t autoOff) {
 ServoInterface* analogServoSlots[4] = { nullptr, nullptr, nullptr, nullptr };
 // Servo timer Interrupt handler
 void SERVO_TIMER_VECTOR() {
-    static uint32_t interval;
-
     // apparently have to read status register
-    TC_GetStatus(SERVO_TIMER, SERVO_TIMER_CHANNEL);
-
+    SERVO_TIMER->TC_CHANNEL[SERVO_TIMER_CHANNEL].TC_SR;
+#if NUM_SERVOS > 0
+    static uint32_t interval = 0;
     fast8_t servoId = servoIndex >> 1;
     ServoInterface* act = analogServoSlots[servoId];
     if (act == nullptr) {
@@ -984,8 +1011,9 @@ void SERVO_TIMER_VECTOR() {
                      SERVO5000US - interval);
             if (servoAutoOff[servoId]) {
                 servoAutoOff[servoId]--;
-                if (servoAutoOff[servoId] == 0)
+                if (servoAutoOff[servoId] == 0) {
                     HAL::servoTimings[servoId] = 0;
+                }
             }
         } else { // enable
             InterruptProtectedBlock noInt;
@@ -1003,6 +1031,7 @@ void SERVO_TIMER_VECTOR() {
     if (servoIndex > 7) {
         servoIndex = 0;
     }
+#endif
 // Add all generated servo interrupt handlers
 #undef IO_TARGET
 #define IO_TARGET IO_TARGET_SERVO_INTERRUPT
@@ -1048,7 +1077,7 @@ void PWM_TIMER_VECTOR() {
 #endif
     //InterruptProtectedBlock noInt;
     // apparently have to read status register
-    TC_GetStatus(PWM_TIMER, PWM_TIMER_CHANNEL);
+    PWM_TIMER->TC_CHANNEL[PWM_TIMER_CHANNEL].TC_SR;
 
     static uint8_t pwm_count0 = 0; // Used my IO_PWM_SOFTWARE!
     static uint8_t pwm_count1 = 0;
@@ -1116,11 +1145,20 @@ void PWM_TIMER_VECTOR() {
         HAL::wdPinged = false;
     }
 #endif
+
+#if (ENABLED(MOTION2_USE_REALTIME_TIMER) && PREPARE_FREQUENCY <= (PWM_CLOCK_FREQ / 2))
+    // Asynchronously reenable the RTT in here.
+    // otherwise we'd need a busy loop to wait the 40us needed, or something.
+    if (!(RTT->RTT_SR) && !(RTT->RTT_MR & RTT_MR_RTTINCIEN)) {
+        RTT->RTT_MR |= RTT_MR_RTTINCIEN;
+    }
+#endif
 #if DEBUG_TIMING
     WRITE(DEBUG_ISR_TEMP_PIN, 0);
 #endif
 }
 
+#if (DISABLED(MOTION2_USE_REALTIME_TIMER) || PREPARE_FREQUENCY > (PWM_CLOCK_FREQ / 2))
 TcChannel* motion2Channel = (MOTION2_TIMER->TC_CHANNEL + MOTION2_TIMER_CHANNEL);
 
 // MOTION2_TIMER IRQ handler
@@ -1128,26 +1166,44 @@ void MOTION2_TIMER_VECTOR() {
 #if DEBUG_TIMING
     WRITE(DEBUG_ISR_MOTION_PIN, 1);
 #endif
-    static bool inside = false; // prevent double call when not finished
-    motion2Channel->TC_SR;      // faster replacement for above line!
-    if (inside) {
-        return;
-    }
-    inside = true;
+    motion2Channel->TC_SR; // faster replacement for above line!
     Motion2::timer();
-    inside = false;
 #if DEBUG_TIMING
     WRITE(DEBUG_ISR_MOTION_PIN, 0);
 #endif
 }
+#else
+extern "C" void RTT_Handler() {
+#if DEBUG_TIMING
+    WRITE(DEBUG_ISR_MOTION_PIN, 1);
+#endif
+    // It's possible for the RTT interrupt to actually preempt itself
+    // unless you disable it and reenable it once the status is clear.
+    // It takes two slow clock cycles (32.768kHz so 40-50us~) to clear. 
+    RTT->RTT_SR;
+    RTT->RTT_MR &= ~RTT_MR_RTTINCIEN;
+    Motion2::timer(); 
+#if DEBUG_TIMING
+    WRITE(DEBUG_ISR_MOTION_PIN, 0);
+#endif
+}
+#endif
 
 #if NUM_BEEPERS > 0
 // IRQ handler for tone generator
 void BEEPER_TIMER_VECTOR() {
-    TC_GetStatus(BEEPER_TIMER, BEEPER_TIMER_CHANNEL);
+    // always need to feed the beeper loop a bool "beeperIRQPhase"
+    // beeper turns ON at at max counter timer hit. Turns OFF at RA compare
+    // (our timer's "duty" counter)
+
+    bool beeperIRQPhase = false;
+    if ((BEEPER_TIMER->TC_CHANNEL[BEEPER_TIMER_CHANNEL].TC_SR) & TC_SR_CPCS) {
+        beeperIRQPhase = true;
+    }
 #undef IO_TARGET
 #define IO_TARGET IO_TARGET_BEEPER_LOOP
 #include "io/redefine.h"
+    (void)beeperIRQPhase; // avoid gcc unused warning
 }
 #endif
 
@@ -1169,7 +1225,7 @@ void HAL::tone(uint32_t frequency) {
             }
             beeperCurFreq = playingBeepers[i - NUM_BEEPERS]->getCurFreq();
             beeperCurFreq -= (beeperCurFreq % reduce);
-            playingBeepers[i - NUM_BEEPERS]->setFreqDiv((multiFreq / beeperCurFreq) - 1);
+            playingBeepers[i - NUM_BEEPERS]->setFreqDiv(curPlaying > 1 ? constrain((multiFreq / beeperCurFreq) - 1, 0, 1000) : 0);
         } else {
             if (beepers[i]->getOutputType() == 1 && beepers[i]->isPlaying()) {
                 beeperCurFreq = beepers[i]->getCurFreq();
@@ -1184,16 +1240,18 @@ void HAL::tone(uint32_t frequency) {
     }
     frequency = multiFreq;
 #endif
-    frequency *= 2;
     if (frequency < 1) {
         return;
     }
     if (!(TC_GetStatus(BEEPER_TIMER, BEEPER_TIMER_CHANNEL) & TC_SR_CLKSTA)) {
         TC_Start(BEEPER_TIMER, BEEPER_TIMER_CHANNEL);
     }
+    // 100% volume is 50% duty
+    float percent = (static_cast<float>(Printer::toneVolume) * 50.0f) * 0.0001f;
     uint32_t rc = (F_CPU_TRUE / 2) / frequency;
+    uint32_t ra = static_cast<uint32_t>(static_cast<float>(rc) * percent);
     TC_SetRC(BEEPER_TIMER, BEEPER_TIMER_CHANNEL, rc);
-    // If the counter is already beyond our desired RC, reset it.
+    TC_SetRA(BEEPER_TIMER, BEEPER_TIMER_CHANNEL, ra);
     if (TC_ReadCV(BEEPER_TIMER, BEEPER_TIMER_CHANNEL) > rc) {
         BEEPER_TIMER->TC_CHANNEL[BEEPER_TIMER_CHANNEL].TC_CCR = TC_CCR_SWTRG;
     }

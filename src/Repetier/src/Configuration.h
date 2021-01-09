@@ -16,8 +16,7 @@
 
 */
 
-#ifndef CONFIGURATION_H
-#define CONFIGURATION_H
+#pragma once
 
 /**************** READ FIRST ************************
 
@@ -37,29 +36,28 @@
 */
 
 // The follwing variables are required early to decide on the right modules.
-#define NUM_TOOLS 4
+#define NUM_TOOLS 2
 #define NUM_EXTRUDER 2
-#define NUM_SERVOS 1                  // Number of servos available
-#define MOTHERBOARD MOTHERBOARD_FELIX // 405
-#define EEPROM_MODE 1
+#define NUM_SERVOS 1                  // Number of serves available
+#define MOTHERBOARD MOTHERBOARD_RADDS // 405
+#define EEPROM_MODE 3
 #define RFSERIAL Serial
 //#define EXTERNALSERIAL  use Arduino serial library instead of build in. Requires more ram, has only 63 byte input buffer.
 // Uncomment the following line if you are using Arduino compatible firmware made for Arduino version earlier then 1.0
 // If it is incompatible you will get compiler errors about write functions not being compatible!
 //#define COMPAT_PRE1
-#define BLUETOOTH_SERIAL -1
+#define BLUETOOTH_SERIAL 101
 #define BLUETOOTH_BAUD 115200
 #define WAITING_IDENTIFIER "wait"
 #define JSON_OUTPUT 1
-#define FEATURE_WATCHDOG 1
+#define FEATURE_WATCHDOG 0
 #define FEATURE_RETRACTION 1
-#define NUM_AXES 4                   // X,Y,Z and E for extruder A,B,C would be 5,6,7
-#define STEPPER_FREQUENCY 154000     // Maximum stepper frequency.
-#define PREPARE_FREQUENCY 2000       // Update frequency for new blocks. Must be higher then PREPARE_FREQUENCY.
-#define BLOCK_FREQUENCY 1000         // Number of blocks with constant stepper rate per second.
+#define NUM_AXES 4 // X,Y,Z and E for extruder A,B,C would be 5,6,7
+// #define STEPPER_FREQUENCY 153000     // Maximum stepper frequency.
+#define STEPPER_FREQUENCY 100000     // Maximum stepper frequency.
+#define PREPARE_FREQUENCY 1000       // Update frequency for new blocks. Must be higher then PREPARE_FREQUENCY.
+#define BLOCK_FREQUENCY 500          // Number of blocks with constant stepper rate per second.
 #define VELOCITY_PROFILE 2           // 0 = linear, 1 = cubic, 2 = quintic velocity shape
-#define SLOW_DIRECTION_CHANGE 1      // can be reason for lost steps on slow drivers
-#define SMALL_SEGMENT_SIZE 0.4       // Smaller segments reduce join speed to prevent vibrations causing lost steps
 #define Z_SPEED 10                   // Z positioning speed
 #define XY_SPEED 150                 // XY positioning speed for normal operations
 #define E_SPEED 2                    // Extrusion speed
@@ -67,11 +65,12 @@
 #define MAX_ROOM_TEMPERATURE 25      // No heating below this temperature!
 #define TEMPERATURE_CONTROL_RANGE 20 // Start with controlling if temperature is +/- this value to target temperature
 #define HOST_RESCUE 1                // Enable host rescue help system
-#define DEBUG_RESCUE                 // Uncomment to add power loss entry in debug menu while printing
-#define POWERLOSS_LEVEL 2            // How much time do we have on powerloss, 0 = no move, 1 = short just raise Z, 2 = long full park move
-#define POWERLOSS_UP 5               // How much to move up if mode 1 is active
-#define Z_PROBE_BORDER 2             // Safety border to ensure position is allowed
-#define Z_PROBE_TEMPERATURE 0        // Temperature for type 2
+//#define DEBUG_RESCUE                 // Uncomment to add power loss entry in debug menu while printing
+#define POWERLOSS_LEVEL 2       // How much time do we have on powerloss, 0 = no move, 1 = short just raise Z, 2 = long full park move
+#define POWERLOSS_UP 5          // How much to move up if mode 1 is active
+#define Z_PROBE_TYPE 2          // 0 = no z probe, 1 = default z probe, 2 = Nozzle as probe
+#define Z_PROBE_BORDER 2        // Safety border to ensure position is allowed
+#define Z_PROBE_TEMPERATURE 170 // Temperature for type 2
 
 // 0 = Cartesian, 1 = CoreXYZ, 2 = delta, 3 = Dual X-Axis
 #define PRINTER_TYPE 0
@@ -83,14 +82,24 @@
 // Normally only a delta has motor end stops required. Normally you trigger using axis endstops.
 #define NO_MOTOR_ENDSTOPS
 
-#define FEATURE_CONTROLLER CONTROLLER_FELIX_DUE
+#define FEATURE_CONTROLLER CONTROLLER_SPARKLCD //  CONTROLLER_FELIX_DUE
 // Use more memory to speedup display updates
 #define DISPLAY_FULL_BUFFER 1
 // Direction 1 or -1
-#define ENCODER_DIRECTION -1
+// #define ENCODER_DIRECTION -1
 // Encoder speed 0 = fastest, 1 or 2 = slowest - set so 1 click is one menu move
 // Default is 2 if not set by controller. Us eonly to fix wrong setting
-// #define ENCODER_SPEED 2
+#define ENCODER_SPEED 1
+// Default materials in temperature menus. First value is extruder temp, then bed and chamber temperature. 0 = do not show.
+#define DEFAULT_MATERIALS \
+    DEFAULT_MATERIAL(Com::tMatPLA, 215, 60, 0) \
+    DEFAULT_MATERIAL(Com::tMatPET, 230, 55, 0) \
+    DEFAULT_MATERIAL(Com::tMatASA, 260, 105, 0) \
+    DEFAULT_MATERIAL(Com::tMatPC, 275, 110, 0) \
+    DEFAULT_MATERIAL(Com::tMatABS, 255, 100, 0) \
+    DEFAULT_MATERIAL(Com::tMatHIPS, 220, 100, 0) \
+    DEFAULT_MATERIAL(Com::tMatPP, 254, 100, 0) \
+    DEFAULT_MATERIAL(Com::tMatFLEX, 240, 50, 0)
 
 /* Ratios for core xyz. First index denotes motor and second axis.
 For each motor you can set the ratio of x,y,z position that adds
@@ -183,9 +192,8 @@ CONFIG_VARIABLE_EQ(EndstopDriver, *ZProbe, &endstopZMin)
 
 #define SERVO_LIST \
     { &Servo1 }
-
 #define TOOLS \
-    { &ToolExtruder1, &ToolExtruder2, &Laser3, &CNC4 }
+    { &ToolExtruder1, &ToolExtruder2 }
 
 // Heaters enumerate all heaters, so we can loop over them
 // or call commands on a specific heater number.
@@ -198,9 +206,9 @@ CONFIG_VARIABLE_EQ(EndstopDriver, *ZProbe, &endstopZMin)
 // Id's start at 0 and depend on position in this array.
 #define NUM_MOTORS 5
 #define MOTORS \
-    { &XMotor, &YMotor, &ZMotor, &AL1Motor, &AL2Motor }
+    { &XMotor, &YMotor, &ZMotor }
 #define MOTOR_NAMES \
-    { PSTR("X"), PSTR("Y"), PSTR("Z"), PSTR("Adj. 1"), PSTR("Adj. 2") }
+    { PSTR("X"), PSTR("Y"), PSTR("Z") }
 
 // Some common settings for trinamic driver settings
 /**
@@ -265,17 +273,6 @@ CONFIG_VARIABLE_EQ(EndstopDriver, *ZProbe, &endstopZMin)
 // ################## EDIT THESE SETTINGS MANUALLY ################
 // ################ END MANUAL SETTINGS ##########################
 
-#undef FAN_BOARD_PIN
-#define FAN_BOARD_PIN -1
-#define BOARD_FAN_SPEED 255
-#define BOARD_FAN_MIN_SPEED 0
-#define FAN_THERMO_PIN -1
-#define FAN_THERMO_MIN_PWM 128
-#define FAN_THERMO_MAX_PWM 255
-#define FAN_THERMO_MIN_TEMP 45
-#define FAN_THERMO_MAX_TEMP 60
-#define FAN_THERMO_THERMISTOR_PIN -1
-#define FAN_THERMO_THERMISTOR_TYPE 1
 #undef Y_MIN_PIN
 #define Y_MIN_PIN -1
 #undef X_MAX_PIN
@@ -285,15 +282,10 @@ CONFIG_VARIABLE_EQ(EndstopDriver, *ZProbe, &endstopZMin)
 #undef Z_MAX_PIN
 #define Z_MAX_PIN -1
 
-#define MIXING_EXTRUDER 0
-
-#define DRIVE_SYSTEM 0
-#define EXTRUDER_FAN_COOL_TEMP 50
 #define KILL_IF_SENSOR_DEFECT 0
 #define RETRACT_ON_PAUSE 2
 #define PAUSE_START_COMMANDS ""
 #define PAUSE_END_COMMANDS ""
-#define SHARED_EXTRUDER_HEATER 0
 
 #define AUTORETRACT_ENABLED 0
 #define RETRACTION_LENGTH 3
@@ -310,24 +302,11 @@ CONFIG_VARIABLE_EQ(EndstopDriver, *ZProbe, &endstopZMin)
 #define FILAMENTCHANGE_SHORTRETRACT 2.5
 #define FILAMENTCHANGE_LONGRETRACT 50
 #define JAM_METHOD 1
-#define JAM_STEPS 220
-#define JAM_SLOWDOWN_STEPS 1000
-#define JAM_SLOWDOWN_TO 75
-#define JAM_ERROR_STEPS 1500
-#define JAM_MIN_STEPS 10
 #define JAM_ACTION 1
 
 #define RETRACT_DURING_HEATUP true
 #define PID_CONTROL_RANGE 20
-#define SKIP_M109_IF_WITHIN 5
-#define SCALE_PID_TO_MAX 0
-#define TEMP_HYSTERESIS 0
 #define EXTRUDE_MAXLENGTH 160
-
-#define GENERIC_THERM_VREF 5
-#define GENERIC_THERM_NUM_ENTRIES 33
-#define HEATER_PWM_SPEED 0
-#define COOLER_PWM_SPEED 0
 
 // ############# Heated bed configuration ########################
 
@@ -395,12 +374,10 @@ CONFIG_VARIABLE_EQ(EndstopDriver, *ZProbe, &endstopZMin)
 #define X_BACKLASH 0
 #define Y_BACKLASH 0
 #define Z_BACKLASH 0
-#define DIRECTION_DELAY 0
 #define MAX_JERK 5
 #define MAX_ZJERK 0.3
 #define PRINTLINE_CACHE_SIZE 32
 #define MOVE_CACHE_LOW 10
-#define LOW_TICKS_PER_MOVE 250000
 #define EXTRUDER_SWITCH_XY_SPEED 100
 #define FEATURE_DITTO_PRINTING 0
 
@@ -418,27 +395,31 @@ CONFIG_VARIABLE_EQ(EndstopDriver, *ZProbe, &endstopZMin)
 
 // #################### Z-Probing #####################
 
-// Depending on the here selected z probe type some options may be ignored.
-// Z_PROBE_TYPE_NONE - No z probe available
-// Z_PROBE_TYPE_DEFAULT - Default z probe triggers on a pin change
-// Z_PROBE_TYPE_NOZZLE - Nozzle is z probe. Supports heating before probing.
-// Z_PROBE_TYPE_BLTOUCH - BLtouch/3DTouch z probe. Contains logic for pin.
-#define Z_PROBE_TYPE Z_PROBE_TYPE_NONE
-#define Z_PROBE_HEIGHT 3             // Distance bed-nozzle when trigger switches
-#define Z_PROBE_BED_DISTANCE 10      // Optimal starting distance
-#define Z_PROBE_SPEED 5              // Speed fo z testing
-#define Z_PROBE_X_OFFSET 0           // x offset relative to extruder 0,0 offset
-#define Z_PROBE_Y_OFFSET 26          // y offset relative to extruder 0,0 offset
-#define Z_PROBE_COATING 0            // Coating thickness if not detected by probe
-#define Z_PROBE_DELAY 0              // Extra delay before starting again. Only needed on electronic probes keeping state for a while
-#define Z_PROBE_REPETITIONS 1        // How often should we probe, 1 is minimum
-#define Z_PROBE_USE_MEDIAN 1         // 0 = use average, 1 = use middle value after ordering z
-#define Z_PROBE_SWITCHING_DISTANCE 2 // Minimum distance required to safely untrigger probe - used for faster repeated measurement
-#define Z_PROBE_BORDER 2             // Safety border to ensure position is allowed
-#define Z_PROBE_PAUSE_HEATERS 0      // Pause all heaters when probing to reduce EMI artifacts
+#define Z_PROBE_COATING 0
+#define Z_PROBE_Z_OFFSET_MODE 1
+#define UI_BED_COATING 1
+#define EXTRUDER_IS_Z_PROBE 1
+#define Z_PROBE_DISABLE_HEATERS 1
+#define Z_PROBE_BED_DISTANCE 3
+#define Z_PROBE_X_OFFSET 0
+#define Z_PROBE_Y_OFFSET 0
+#define Z_PROBE_SPEED 2
+#define Z_PROBE_SWITCHING_DISTANCE 1
+// How often should we test a position 1 .. x. Averages result over all tests.
+#define Z_PROBE_REPETITIONS 1
+// 0 = use average, 1 = use middle value after ordering z
+#define Z_PROBE_USE_MEDIAN 1
+// Nozzle distance to bed when z probe triggers
+#define Z_PROBE_HEIGHT -0.15
+// Delay in ms before we go down again. For BLTouch so signal can disable
+#define Z_PROBE_DELAY 0
 #define Z_PROBE_START_SCRIPT ""
 #define Z_PROBE_FINISHED_SCRIPT ""
 #define Z_PROBE_RUN_AFTER_EVERY_PROBE ""
+#define Z_PROBE_REQUIRES_HEATING 1
+#define Z_PROBE_MIN_TEMPERATURE 150
+#define Z_PROBE_PAUSE_HEATERS 0         // Pause all heaters when probing to reduce EMI artifacts
+#define Z_PROBE_PAUSE_BED_REHEAT_TEMP 5 // Stop and reheat the bed if we leave the target temp by this much.
 
 // How to correct rotated beds
 // 0 = Software side by rotating coordinates
@@ -469,7 +450,7 @@ CONFIG_VARIABLE_EQ(EndstopDriver, *ZProbe, &endstopZMin)
 #define L_P2_Y 45
 #define L_P3_X 137
 #define L_P3_Y 210
-#define GRID_SIZE 5
+#define MAX_GRID_SIZE 5                   // Maximum grid size allocation in memory, imported grid can be smaller
 #define ENABLE_BUMP_CORRECTION 1          // CPU intensive, so only activate if required
 #define BUMP_CORRECTION_START_DEGRADE 0.5 // Until this height we correct 100%
 #define BUMP_CORRECTION_END_HEIGHT 2      // From this height on we do no correction
@@ -487,23 +468,10 @@ CONFIG_VARIABLE_EQ(EndstopDriver, *ZProbe, &endstopZMin)
 #define ARC_SUPPORT 0
 #define FEATURE_MEMORY_POSITION 1
 #define FEATURE_CHECKSUM_FORCED 0
-#define FEATURE_FAN_CONTROL 1
-#define FEATURE_FAN2_CONTROL 0
-#define ADC_KEYPAD_PIN -1
-#define LANGUAGE_EN_ACTIVE 1
-#define LANGUAGE_DE_ACTIVE 1
-#define LANGUAGE_NL_ACTIVE 1
-#define LANGUAGE_PT_ACTIVE 1
-#define LANGUAGE_IT_ACTIVE 1
-#define LANGUAGE_ES_ACTIVE 1
-#define LANGUAGE_FI_ACTIVE 1
-#define LANGUAGE_SE_ACTIVE 1
-#define LANGUAGE_FR_ACTIVE 1
-#define LANGUAGE_CZ_ACTIVE 1
-#define LANGUAGE_PL_ACTIVE 1
-#define LANGUAGE_TR_ACTIVE 1
-#define UI_PRINTER_NAME "FELIX Pro 1"
-#define UI_PRINTER_COMPANY "FELIXprinters"
+#define UI_PRINTER_NAME "Testsetup"
+#define UI_PRINTER_COMPANY "Repetier"
+#define UI_PAGES_DURATION 4000
+#define UI_SPEEDDEPENDENT_POSITIONING 0
 #define UI_DISABLE_AUTO_PAGESWITCH 1
 #define UI_AUTORETURN_TO_MENU_AFTER 30000
 #define FEATURE_UI_KEYS 0
@@ -513,33 +481,8 @@ CONFIG_VARIABLE_EQ(EndstopDriver, *ZProbe, &endstopZMin)
 #define UI_KEY_FIRST_REPEAT 500
 #define UI_KEY_REDUCE_REPEAT 50
 #define UI_KEY_MIN_REPEAT 50
-#define FEATURE_BEEPER 0
 #define CASE_LIGHTS_PIN 25
 #define CASE_LIGHT_DEFAULT_ON 1
 #define UI_START_SCREEN_DELAY 2000
-#define UI_HEAD "E1:%e0\002C E2:%e1\002C B:%eb\002C"
-/**
-Beeper sound definitions for short beeps during key actions
-and longer beeps for important actions.
-Parameter is delay in microseconds and the secons is the number of repetitions.
-Values must be in range 1..255
-*/
-#define BEEPER_SHORT_SEQUENCE 2, 2
-#define BEEPER_LONG_SEQUENCE 8, 8
-#define UI_SET_MIN_HEATED_BED_TEMP 30
-#define UI_SET_MAX_HEATED_BED_TEMP 120
-#define UI_SET_MIN_EXTRUDER_TEMP 80
-#define UI_SET_MAX_EXTRUDER_TEMP 275
-#define UI_SET_EXTRUDER_FEEDRATE 5
-#define UI_SET_EXTRUDER_RETRACT_DISTANCE 3
 
 //#define CUSTOM_EVENTS
-//#define CUSTOM_MENU
-//#define CUSTOM_TRANSLATIONS
-#define HALFAUTOMATIC_LEVELING 1
-// add z probe height routine
-#define ZPROBE_HEIGHT_ROUTINE
-#define ZPROBE_REF_HEIGHT 5.97
-#define Z_UP_AFTER_HOME 10
-
-#endif

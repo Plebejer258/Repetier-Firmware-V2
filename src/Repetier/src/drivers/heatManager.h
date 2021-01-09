@@ -69,10 +69,18 @@ protected:
     uint16_t eepromPos;         // Start position in eeprom
     millis_t lastUpdate;        // Time of last sampling
     fast8_t flags;
+    float hysteresisTemperature; // Temperature corridor we need to be inside, 0 = off
+    millis_t hysteresisTime;     // time in ms we need to be inside this corridor
+    millis_t maxWait;            // longest time to wait for target temperature - causes error if exceeded, 0 = off
 
 public:
     HeatManager(char htType, fast8_t _index, IOTemperature* i, PWMHandler* o, float maxTemp, fast8_t maxPwm, millis_t _sampleTime, float decVariance, millis_t decPeriod, bool _hotPluggable);
     void init();
+    void initHysteresis(float _hysteresisTemperature, millis_t _hysteresisTime, millis_t _maxWait) {
+        hysteresisTemperature = _hysteresisTemperature;
+        hysteresisTime = _hysteresisTime;
+        maxWait = _maxWait;
+    }
     virtual void setTargetTemperature(float temp) {
         if (temp > maxTemperature) {
             Com::printWarningF(PSTR("Selected temp. was higher then max. temperaure. Max. Temp:"));
@@ -91,6 +99,7 @@ public:
         }
         targetTemperature = temp;
     }
+    void showTemperature(GUIAction action, FSTRINGPARAM(name), int extTemp, int bedTemp, int chamberTemp);
     inline bool isEnabled() {
         return decoupleMode != DecoupleMode::PAUSED && targetTemperature > MAX_ROOM_TEMPERATURE;
     }
@@ -127,26 +136,37 @@ public:
     virtual float getP() { return 0; }
     virtual float getI() { return 0; }
     virtual float getD() { return 0; }
-    virtual void setPID(float p, float i, float d) {}
+    virtual void setPID(float p, float i, float d) { }
     inline millis_t getSampleTime() {
         return sampleTime;
     }
-
+    inline float getDecoupleVariance() { return decoupleVariance; }
+    inline void setDecoupleVariance(float val) { decoupleVariance = val; }
+    inline millis_t getDecouplePeriod() { return decouplePeriod; }
+    inline void setDecouplePeriod(millis_t val) { decouplePeriod = val; }
+    inline float getHysteresisTemperature() { return hysteresisTemperature; }
+    inline void setHysteresisTemperature(float val) { hysteresisTemperature = val >= 0 ? val : 0; }
+    inline millis_t getHysteresisTime() { return hysteresisTime; }
+    inline void setHysteresisTime(millis_t val) { hysteresisTime = val >= 0 ? val : 0; }
+    inline millis_t getMaxWait() { return maxWait; }
+    inline void setMaxWait(millis_t val) { maxWait = val >= 0 ? val : 0; }
     virtual void updateLocal(float tempError) = 0;
     void eepromHandle();
     virtual void eepromHandleLocal(int pos) = 0;
     virtual int eepromSizeLocal() { return 0; };
     void update();
-    virtual void updateDerived() {}
+    virtual void updateDerived() { }
     /** Waits until the set target temperature is reached */
     void waitForTargetTemperature();
     inline float getMaxTemperature() { return maxTemperature; }
+    inline void setMaxTemperature(float val) { maxTemperature = val; }
     void reportTemperature(char c, int idx);
     virtual void autocalibrate(GCode* g) {
         Com::printWarningFLN(PSTR("Autocalibration for this tool not supported!"));
     }
     virtual void showControlMenu(GUIAction action); // Default set temperature
-    virtual void showConfigMenu(GUIAction action) {}
+    void showBaseConfigMenu(GUIAction action);      // config menu of base class
+    virtual void showConfigMenu(GUIAction action) { showBaseConfigMenu(action); }
     virtual bool hasConfigMenu();
     bool isExtruderHeater() const { return heaterType == 'E'; }
     bool isBedHeater() const { return heaterType == 'B'; }
@@ -164,6 +184,10 @@ public:
 class HeatManagerBangBang : public HeatManager {
 
 public:
+    HeatManagerBangBang(char htType, fast8_t _index, IOTemperature* _input, PWMHandler* output, float maxTemp, fast8_t maxPwm, millis_t _sampleTime, float decVariance, millis_t decPeriod, bool _hotPluggable)
+        : HeatManager(htType, _index, _input,
+                      output, maxTemp, maxPwm, _sampleTime, decVariance, decPeriod, _hotPluggable) {
+    }
     void updateLocal(float tempError) {
         output->set(currentTemperature > targetTemperature ? 0 : maxPWM);
     }
@@ -303,7 +327,7 @@ public:
     void setDeadUp2(float val) { deadUp2 = val; }
     float getDeadDown2() { return deadDown2; }
     void setDeadDown2(float val) { deadDown2 = val; }
-    void showControlMenu(GUIAction action);
+    // void showControlMenu(GUIAction action);
     void showConfigMenu(GUIAction action);
     virtual bool hasConfigMenu() { return true; }
 };
